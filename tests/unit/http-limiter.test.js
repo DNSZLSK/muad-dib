@@ -385,6 +385,38 @@ async function runHttpLimiterTests() {
     }
   });
 
+  // The boot banner fires on the first registry request of any command, including
+  // `muaddib scan --json`, whose stdout the GitHub Action parses as JSON
+  // (action.yml: scan --json > result.json). A banner on stdout broke JSON.parse as
+  // soon as a token was configured. Real subprocess, real console: stdout must stay
+  // empty, the banner must land on stderr, with and without a token.
+  await asyncTest('REGISTRY-AUTH: boot banner goes to stderr, never stdout (scan --json stays parseable)', async () => {
+    const { spawnSync } = require('child_process');
+    const authPath = require.resolve('../../src/shared/registry-auth.js');
+    const code = `require(${JSON.stringify(authPath)}).registryAuthHeaders('https://registry.npmjs.org/lodash');`;
+    const isolated = {
+      ...process.env,
+      HOME: path.join(os.tmpdir(), 'muaddib-no-home'),
+      USERPROFILE: path.join(os.tmpdir(), 'muaddib-no-home'),
+      MUADDIB_NPMRC: path.join(os.tmpdir(), 'muaddib-no-npmrc')
+    };
+    delete isolated.NPM_TOKEN;
+
+    const withToken = spawnSync(process.execPath, ['-e', code],
+      { env: { ...isolated, MUADDIB_NPM_TOKEN: 'npm_testtoken1234' }, encoding: 'utf8' });
+    assert(withToken.stdout === '', `token set: stdout must stay empty, got ${JSON.stringify(withToken.stdout)}`);
+    assert(withToken.stderr.includes('[REGISTRY-AUTH] npm registry auth ENABLED') && withToken.stderr.includes('…1234'),
+      `token set: banner expected on stderr, got ${JSON.stringify(withToken.stderr)}`);
+    assert(!withToken.stderr.includes('npm_testtoken1234'), 'the banner must never print the full token');
+
+    const noTokenEnv = { ...isolated };
+    delete noTokenEnv.MUADDIB_NPM_TOKEN;
+    const noToken = spawnSync(process.execPath, ['-e', code], { env: noTokenEnv, encoding: 'utf8' });
+    assert(noToken.stdout === '', `no token: stdout must stay empty, got ${JSON.stringify(noToken.stdout)}`);
+    assert(noToken.stderr.includes('[REGISTRY-AUTH] npm registry auth DISABLED'),
+      `no token: DISABLED banner expected on stderr, got ${JSON.stringify(noToken.stderr)}`);
+  });
+
   await asyncTest('LIMITER: isHostBackedOff reflects per-host 429 backoff', async () => {
     const { limiter, restore } = freshLimiter({ MUADDIB_REGISTRY_BACKOFF_BASE_MS: 1000 });
     try {

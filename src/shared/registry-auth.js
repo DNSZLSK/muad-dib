@@ -89,12 +89,16 @@ function npmAuthStatus() {
 }
 
 let _logged = false;
+// Diagnostics go to stderr (error/warn), never stdout: this fires on the first
+// registry request of ANY command, and `muaddib scan --json > result.json` (the
+// GitHub Action) parses stdout as JSON. A stdout banner made JSON.parse fail as
+// soon as a token was configured, and the Action reported empty outputs.
 function logAuthStatusOnce(logger = console) {
   if (_logged) return;
   _logged = true;
   const s = npmAuthStatus();
   if (s.enabled) {
-    logger.log(`[REGISTRY-AUTH] npm registry auth ENABLED (source=${s.source}, token …${s.last4})`);
+    logger.error(`[REGISTRY-AUTH] npm registry auth ENABLED (source=${s.source}, token …${s.last4})`);
   } else {
     logger.warn('[REGISTRY-AUTH] npm registry auth DISABLED — anonymous registry.npmjs.org (set MUADDIB_NPM_TOKEN); expect heavier 429 throttling.');
   }
