@@ -50,6 +50,10 @@ const { getMaxFileSize } = require('../shared/constants.js');
 // often span ecosystems.
 const SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.py'];
 
+// Source-pass exclusions: node_modules gets its own pass below; .git and our
+// cache are never package content. dist/build/out are scanned on purpose.
+const SOURCE_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
+
 // Per-file cap on number of distinct string-IOC matches reported. One
 // rule fire per (file, string) tuple is enough; multiple matches in the
 // same file would inflate the report without adding signal.
@@ -76,10 +80,13 @@ async function scanIocStrings(targetPath) {
 
   // Walk: scan the package source (everything outside node_modules) AND
   // also walk node_modules (a malicious dep can carry the IOCs even if
-  // the host package is clean). EXCLUDED_DIRS in utils.js skips
-  // node_modules by default, so we do two findFiles passes with
-  // explicit excludedDirs lists.
-  const sourceFiles = findFiles(targetPath, { extensions: SCAN_EXTENSIONS });
+  // the host package is clean). Two findFiles passes with explicit
+  // excludedDirs lists. The source pass deliberately does NOT inherit the
+  // heuristic scanners' dist/build/out exclusion: those directories are
+  // skipped elsewhere to avoid bundle false positives, but a string IOC is
+  // decisive by construction, and published payloads do live there
+  // (@subql/common@5.8.3 shipped its loader as dist/project/readers/manifest-cache.js).
+  const sourceFiles = findFiles(targetPath, { extensions: SCAN_EXTENSIONS, excludedDirs: SOURCE_EXCLUDED_DIRS });
 
   // node_modules sweep: same extensions, no recursion guard issues since
   // findFiles already handles symlink loops + maxDepth fallback on Windows.
