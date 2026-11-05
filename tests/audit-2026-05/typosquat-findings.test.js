@@ -1,5 +1,7 @@
 // AUDIT 2026-05 Phase 2 — typosquat scanner — findings repro.
-// Run: node tests/audit-2026-05/typosquat-findings.test.js
+// Registered in tests/run-tests.js: every test asserts the FIXED behavior, so they are
+// non-regression guards (RT-C1 compound + F13 cap positives and vetoes, end to end).
+// Still runnable alone: node tests/audit-2026-05/typosquat-findings.test.js
 //
 // RT-C1 (Critical) — typosquat scanner did not catch boundary-squat sub-dependencies
 // like `plain-crypto-js` (Axios UNC1069 March 2026). Audit fixture
@@ -14,8 +16,8 @@ if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
 const path = require('path');
 const { asyncTest, assert, runScanDirect, getCounters } = require('../test-utils.js');
 
-async function run() {
-  console.log('=== AUDIT 2026-05 Phase 2 - typosquat scanner - findings ===\n');
+async function runAuditTyposquatFindingsTests() {
+  console.log('\n=== AUDIT 2026-05 Phase 2 - typosquat scanner - findings ===\n');
   console.log("Chaque test asserts le comportement APRES fix (FIXED). PASS aujourd'hui = correction prouvee.\n");
 
   // ────────────────────────────────────────────────────────────────────────
@@ -190,19 +192,18 @@ async function run() {
       `Axios UNC1069 (dependency_typosquat_used + compound) doit rester >= 35. Got ${score}. F13 must veto.`);
   });
 
-  const c = getCounters();
-  console.log('');
-  console.log(`=== Resultat : ${c.passed} PASS / ${c.failed} FAIL ===`);
-  if (c.failed > 0) {
-    console.log('\nFAILURES :');
-    for (const f of c.failures) {
-      console.log(`  - ${f.name}: ${f.error}`);
-    }
-    process.exit(1);
-  }
 }
 
-run().catch(e => {
-  console.error('Erreur fatale :', e);
-  process.exit(1);
-});
+module.exports = { runAuditTyposquatFindingsTests };
+
+if (require.main === module) {
+  runAuditTyposquatFindingsTests().then(() => {
+    const c = getCounters();
+    console.log(`\n=== Resultat : ${c.passed} PASS / ${c.failed} FAIL ===`);
+    for (const f of c.failures) console.log(`  - ${f.name}: ${f.error}`);
+    process.exit(c.failed > 0 ? 1 : 0);
+  }).catch(e => {
+    console.error('Erreur fatale :', e);
+    process.exit(1);
+  });
+}
