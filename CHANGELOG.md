@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Dependency updates for published upstream advisories.** `adm-zip` 0.6.0 -> 0.6.1 (runtime dependency; GHSA-7q85-xj36-vmfc, GHSA-rcw4-f5rp-g42v, GHSA-j5f4-cc29-5x44, GHSA-8238-w5pm-2374, GHSA-vwc7-r8mq-g2x9, GHSA-p634-w6r4-rjp2, GHSA-c6fg-446q-cg94). `brace-expansion` 5.0.9 -> 5.0.12 (development dependency via eslint/minimatch; GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p). The lockfile refresh also moves the development-only `minimatch` 10.2.5 -> 10.2.6 and `@eslint-community/eslint-utils` 4.9.1 -> 4.10.1 (metadata and comment changes only). Restores the `npm audit --audit-level=high` CI gate. Upstream diffs reviewed: no new network, process, eval or install-script code; registry signatures verified (`npm audit signatures`).
+
 ## [2.12.0] - 2026-08-29
 
 ### Added
