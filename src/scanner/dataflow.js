@@ -71,6 +71,17 @@ const MODULE_SINK_METHODS = {
   }
 };
 
+// Classification tables are dictionaries: an inherited Object.prototype member
+// (constructor, toString, hasOwnProperty) must never read as a source or sink
+// method, e.g. MODULE_SINK_METHODS[mod].toString or a taint whose source is
+// 'constructor'. Null prototypes make every lookup an own-property lookup.
+for (const table of [MODULE_SOURCE_METHODS, MODULE_SINK_METHODS]) {
+  Object.setPrototypeOf(table, null);
+  for (const methods of Object.values(table)) {
+    if (methods && typeof methods === 'object') Object.setPrototypeOf(methods, null);
+  }
+}
+
 // audit DF-H1 v2.11.15: 2026 exfil-prone modules. When imported, ANY call with a
 // credential/env source in the same file → suspicious_module_sink MEDIUM with
 // module attribution. Catches chained access (bot.telegram.sendMessage), dynamic
@@ -297,7 +308,11 @@ function analyzeFile(content, filePath, basePath) {
   const emitTaintedEvents = new Set(); // event names emitted with tainted data
 
   // Fix #23: Function param tainting — track function declarations
-  const functionDefs = new Map(); // functionName → { params: [paramNames] }
+  // functionName -> { params: [name | null] } in ARGUMENT ORDER. A destructured
+  // or default parameter keeps its slot as null: filtering it out shifted every
+  // following name onto the wrong argument (f({a}, token): argument 0's taint
+  // landed on `token`, the real token argument was never followed).
+  const functionDefs = new Map();
 
   // Fix #24: Callback exposure — track function parameters (potential callbacks)
   // When a callback parameter is invoked with tainted data, it's credential exposure.
@@ -311,10 +326,8 @@ function analyzeFile(content, filePath, basePath) {
   walk.simple(ast, {
     FunctionDeclaration(node) {
       if (node.id && node.id.name && node.params) {
-        const paramNames = node.params
-          .filter(p => p.type === 'Identifier')
-          .map(p => p.name);
-        if (paramNames.length > 0) {
+        const paramNames = node.params.map(p => (p.type === 'Identifier' ? p.name : null));
+        if (paramNames.some(Boolean)) {
           functionDefs.set(node.id.name, { params: paramNames });
         }
         // FP fix: skip 1-char parameter names (minified code noise: e, t, n, r, a, b, etc.)
@@ -1119,6 +1132,18 @@ function analyzeFile(content, filePath, basePath) {
       }
     }
 
+    // Weak-source-only co-occurrence: named, non-credential, non-identity env
+    // vars (AWS_REGION, NPM_CONFIG_REGISTRY) next to a network call in the same
+    // file are not proof that the bytes reach the sink (bundled ci-info shape):
+    // keep the indicator at MEDIUM. Not weak, so the computed severity stands:
+    //  - a DYNAMIC process.env[key] read (the env-harvesting loop shape);
+    //  - identity vars (USER, HOSTNAME...) and host telemetry: hostname + user
+    //    sent over the network is the dependency-confusion beacon shape.
+    const weakSourcesOnly = sources.length > 0 && sources.every(s =>
+      s.type === 'env_read' && s.name !== 'process.env[dynamic]' &&
+      !SYSTEM_IDENTITY_ENVS.has(String(s.name).toUpperCase()));
+    if (weakSourcesOnly && (severity === 'CRITICAL' || severity === 'HIGH')) severity = 'MEDIUM';
+
     const sourceDesc = hasCommandOutput ? 'command output' : 'credentials read';
     threats.push({
       type: 'suspicious_dataflow',
@@ -1229,6 +1254,6 @@ function isCredentialPath(arg, sensitivePathVars) {
 // extracted to a shared leaf module so the module-graph cross-file taint can apply the EXACT
 // same credential-vs-config distinction (it previously tainted any process.env read). Imported
 // at module load → in scope for the analyzeDataFlow call sites above. Behavior unchanged here.
-const { isSensitiveEnv, isCredentialEnv } = require('./env-var-classification.js');
+const { isSensitiveEnv, isCredentialEnv, SYSTEM_IDENTITY_ENVS } = require('./env-var-classification.js');
 
 module.exports = { analyzeDataFlow };
