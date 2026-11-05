@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dependency updates for published upstream advisories.** `adm-zip` 0.6.0 -> 0.6.1 (runtime dependency; GHSA-7q85-xj36-vmfc, GHSA-rcw4-f5rp-g42v, GHSA-j5f4-cc29-5x44, GHSA-8238-w5pm-2374, GHSA-vwc7-r8mq-g2x9, GHSA-p634-w6r4-rjp2, GHSA-c6fg-446q-cg94). `brace-expansion` 5.0.9 -> 5.0.12 (development dependency via eslint/minimatch; GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p). The lockfile refresh also moves the development-only `minimatch` 10.2.5 -> 10.2.6 and `@eslint-community/eslint-utils` 4.9.1 -> 4.10.1 (metadata and comment changes only). Restores the `npm audit --audit-level=high` CI gate. Upstream diffs reviewed: no new network, process, eval or install-script code; registry signatures verified (`npm audit signatures`).
 
+### Fixed
+
+- **`muaddib scan --json` printed a non-JSON line on stdout when an npm token was configured (`src/shared/registry-auth.js`).** The one-time `[REGISTRY-AUTH] npm registry auth ENABLED` banner, emitted on the first registry request of any command, went to stdout via `console.log` (the DISABLED variant already used stderr). With `MUADDIB_NPM_TOKEN` / `NPM_TOKEN` set or a token in `~/.npmrc`, `scan --json` output started with that line and `JSON.parse` failed. The GitHub Action redirects `scan --json` stdout to its result file (`action.yml`), so its reporter then published empty `risk_score` / `threats_count` / `critical_count` outputs, and a downstream step gating on those outputs would pass a flagged package (the `--fail-on` exit code itself was unaffected). The banner now goes to stderr. Verified on the real CLI with a token present: JSON parse failed before, succeeds after. Test in `tests/unit/http-limiter.test.js` (real subprocess, token and no-token cases); it fails when the fix is reverted.
+
 ## [2.12.0] - 2026-08-29
 
 ### Added
