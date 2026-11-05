@@ -24,7 +24,7 @@ const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
 const { correlatePhantomGyp } = require('../scanner/phantom-gyp.js');
 const { correlateInstallNativeDropExec } = require('../scanner/native-drop-exec.js');
-const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
+const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier, applyStringIocCorroboration } = require('../scoring.js');
 const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
 const { annotateConfidenceTiers } = require('../rules/confidence-tiers.js');
 const { buildIntentPairs } = require('../intent-graph.js');
@@ -507,6 +507,13 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       deduped.push(it);
     }
   }
+
+  // String-IOC corroboration (package level): decides whether CRITICAL
+  // ioc_string_match findings are decisive (score floor, MT-1 bypass) or, for
+  // an uncorroborated multi-family IOC catalog, informational. Runs on the full
+  // verdict set (compounds and intent threats included), before tiering and
+  // enrichment so the downgrade is reflected in points.
+  applyStringIocCorroboration(deduped);
 
   // FPR plan Chantier 6 - tag every threat with its confidence tier so the
   // CLI / JSON / SARIF formatters can filter to verified+high by default and

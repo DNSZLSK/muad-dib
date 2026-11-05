@@ -116,6 +116,7 @@ async function scanIocStrings(targetPath) {
         file: rel,
         evidence: ioc.string,
         campaign: ioc.campaign,
+        ...(ioc.family ? { family: ioc.family } : {}),
         source: ioc.source
       });
       if (threats.length >= MAX_TOTAL_FINDINGS) break;
