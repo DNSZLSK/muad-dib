@@ -2,7 +2,7 @@
 # Contribuez via PR: https://github.com/DNSZLSK/muad-dib
 
 version: "1.0.0"
-updated: "2026-01-01"
+updated: "2026-11-03"
 
 hashes:
   # ============================================
@@ -163,6 +163,109 @@ hashes:
     description: "jscrambler@8.14.0 payload macOS arm64 Mach-O (infostealer Rust) apres decompression"
     references:
       - https://github.com/jscrambler/jscrambler/issues/322
+
+  # ============================================
+  # CHAINDROP / Shai-Hulud (keyv monorepo, 2026-08)
+  # Worm: the same payload files are copied verbatim into every
+  # propagated package, which is the case exact hashes are decisive for.
+  # ============================================
+  - id: HASH-CHAINDROP-001
+    sha256: "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"
+    file: "Math_Symbol.js"
+    source: chaindrop-2026-08
+    severity: critical
+    confidence: high
+    description: "CHAINDROP worm payload (keyv monorepo direct compromises)"
+    references:
+      - https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain
+  - id: HASH-CHAINDROP-002
+    sha256: "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb"
+    file: "setup.mjs"
+    source: chaindrop-2026-08
+    severity: critical
+    confidence: high
+    description: "CHAINDROP preinstall dropper"
+    references:
+      - https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain
+  - id: HASH-CHAINDROP-003
+    sha256: "54dc7ea54a1317cca0e890a2770630cf7fa6c97813e0cb9d2caa93012b350668"
+    file: "setup.mjs"
+    source: chaindrop-2026-08
+    severity: critical
+    confidence: high
+    description: "CHAINDROP preinstall dropper (variant)"
+    references:
+      - https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain
+
+  # ============================================
+  # Mini Shai-Hulud - tensorlake@0.5.144 (2026-10-08)
+  # ============================================
+  - id: HASH-TENSORLAKE-001
+    sha256: "25a0735d0db7dc40e5d45ce42d9c106067e6a66e184d967cfecfab17c3bcb5ef"
+    file: "lib/setup.mjs"
+    source: tensorlake-2026-10
+    severity: critical
+    confidence: high
+    description: "Mini Shai-Hulud preinstall loader (launches Math_Symbol.js under Bun)"
+    references:
+      - https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/
+  - id: HASH-TENSORLAKE-002
+    sha256: "b50a00900399ba99fb6ce1fc151519cb99d44320ef2a631f2237e1aea0ad6fec"
+    file: "lib/Math_Symbol.js"
+    source: tensorlake-2026-10
+    severity: critical
+    confidence: high
+    description: "Mini Shai-Hulud credential stealer / worm body"
+    references:
+      - https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/
+
+  # ============================================
+  # SubQuery @subql/common@5.8.3 (2026-10-05)
+  # ============================================
+  - id: HASH-SUBQL-001
+    sha256: "f0c8b0cde86b98a2869a22fd43ffcf61f1dcca252729e2be291e590e3dc5f49a"
+    file: "dist/project/readers/manifest-cache.js"
+    source: subql-2026-10
+    severity: critical
+    confidence: high
+    description: "SubQuery loader, run by postinstall and on import"
+    references:
+      - https://www.stepsecurity.io/blog/subql-ecosystem-compromised
+  - id: HASH-SUBQL-002
+    sha256: "7b2807bfb5bfec2383b46ba8226f47edb330ae6b32178eab61e377f3c3486c47"
+    file: "manifest-cache.js (decoded stage)"
+    source: subql-2026-10
+    severity: critical
+    confidence: high
+    description: "SubQuery decoded credential-theft / remote command payload"
+    references:
+      - https://www.stepsecurity.io/blog/subql-ecosystem-compromised
+
+  # ============================================
+  # Trojanized Claude Code extension 2.1.313 (Cursor marketplace, 2026-10-29)
+  # ============================================
+  - id: HASH-CCEXT-001
+    sha256: "ecb58cb29078d9646ad1dcdbe51526f2d9cfea06be5fb2ab183e8ecc3ab6bf15"
+    file: "extension.js"
+    source: claude-code-ext-2026-10
+    severity: critical
+    confidence: high
+    description: "extension.js with 66-line SSH backdoor loader prepended"
+    references:
+      - https://opensourcemalware.com/blog/trojanized-claude-code-extension-plants-persistent-ssh-backdoor
+
+  # ============================================
+  # node-ipc 9.1.6 / 9.2.3 / 12.0.1 (2026-05)
+  # ============================================
+  - id: HASH-NODEIPC-2026-001
+    sha256: "96097e0612d9575cb133021017fb1a5c68a03b60f9f3d24ebdc0e628d9034144"
+    file: "node-ipc.cjs"
+    source: node-ipc-2026-05
+    severity: critical
+    confidence: high
+    description: "node-ipc CommonJS bundle with import-time credential stealer"
+    references:
+      - https://www.stepsecurity.io/blog/node-ipc-npm-supply-chain-attack
 
 markers:
   # ============================================

@@ -111,6 +111,78 @@ async function runIocStringsTests() {
     const threats = await scanIocStrings('/nonexistent/path/blah');
     assert(threats.length === 0, 'Missing target returns empty, got ' + threats.length);
   });
+
+  // ── 2026-08..11 campaigns (CHAINDROP, tensorlake, SubQuery, LiteLLM, Claude Code
+  // extension, GHSA 2026-10-26..28 wave, GhostAction, node-ipc) ──
+  // Expected campaign/severity come from the published research cited in
+  // iocs/string-iocs.yaml, not from scanner output. Each artifact is planted the
+  // way the malware carries it (string literal in a JS/Python source); the
+  // negative twin changes one character, which must not fire: matching is an
+  // exact substring, a near-miss is not the campaign.
+  const CAMPAIGN_2026_Q4 = [
+    ['thebeautifulmarchoftime', 'chaindrop-2026-08', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['IfYouBlockThisAPIKeyItWillCrashTheLiveProductionServersOfAllThirdPartyClients', 'chaindrop-2026-08', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['awqhnjewqjkl.icu', 'chaindrop-2026-08', 'CRITICAL', 'setup.mjs'],
+    ['npm-cache.com', 'chaindrop-2026-08', 'HIGH', 'setup.mjs'],
+    ['0xE1f2395ee43e45A1556EC6438a88c31B83493103', 'chaindrop-2026-08', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['0xe1f2395ee43e45a1556ec6438a88c31b83493103', 'chaindrop-2026-08', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['iseekaigogo.com', 'tensorlake-2026-10', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['0xb614155Fd88114d40549b259457Bcf921Df091B9', 'tensorlake-2026-10', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['0xb614155fd88114d40549b259457bcf921df091b9', 'tensorlake-2026-10', 'CRITICAL', 'lib/Math_Symbol.js'],
+    ['WORMTAG', 'tensorlake-2026-10', 'CRITICAL', 'lib/setup.mjs'],
+    ['ci-artifacts.dev', 'subql-2026-10', 'CRITICAL', 'lib/readers/manifest-cache.js'],
+    ['tmp.ts018051808.lock', 'subql-2026-10', 'CRITICAL', 'lib/readers/manifest-cache.js'],
+    ['litellm.dev/healthcheck', 'litellm-2026-10', 'CRITICAL', 'litellm/cook.py'],
+    ['134.209.82.225', 'claude-code-ext-2026-10', 'CRITICAL', 'extension.js'],
+    ['185.158.107.175', 'depconf-beacon-2026-10', 'CRITICAL', 'beacon.cjs'],
+    ['13.140.137.222', 'depconf-beacon-2026-10', 'CRITICAL', 'beacon.cjs'],
+    ['networkservicesupp.flashhub.net', 'xmrig-npm-2026-10', 'CRITICAL', 'scripts/helper.js'],
+    ['amplify-gursha-dev-121835-deployment', 'xmrig-npm-2026-10', 'CRITICAL', 'scripts/helper.js'],
+    ['cdn-status.mulderitsme.net', 'csvflow-2026-10', 'CRITICAL', 'install.js'],
+    ['0x9c0a507300fd902787bb193d80fca5ce6e1bff9a', 'claudeopus-stego-2026-10', 'CRITICAL', 'loader.py'],
+    ['193.32.204.199', 'ghostaction-2026-10', 'CRITICAL', 'collect.js'],
+    ['sh.azurestaticprovider.net', 'node-ipc-2026-05', 'CRITICAL', 'node-ipc.cjs'],
+    ['qZ8pL3vNxR9wKmTyHbVcFgDsJaEoUi', 'node-ipc-2026-05', 'CRITICAL', 'node-ipc.cjs'],
+  ];
+
+  for (const [ioc, campaign, severity, rel] of CAMPAIGN_2026_Q4) {
+    await asyncTest(`IOC-STR 2026-Q4: "${ioc.slice(0, 32)}" fires as ${campaign}/${severity}`, async () => {
+      const body = rel.endsWith('.py')
+        ? `TARGET = "${ioc}"\n`
+        : `const target = "${ioc}";\nmodule.exports = target;\n`;
+      const dir = mkPkg('campaign-sample', { [rel]: body });
+      try {
+        const hits = (await scanIocStrings(dir)).filter(t => t.type === 'ioc_string_match' && t.evidence === ioc);
+        assert(hits.length === 1, `expected exactly 1 finding for ${ioc}, got ${hits.length}`);
+        assert(hits[0].campaign === campaign, `campaign: expected ${campaign}, got ${hits[0].campaign}`);
+        assert(hits[0].severity === severity, `severity: expected ${severity}, got ${hits[0].severity}`);
+        assert(hits[0].file.replace(/\\/g, '/') === rel, `file: expected ${rel}, got ${hits[0].file}`);
+      } finally { rmrf(dir); }
+    });
+
+    await asyncTest(`IOC-STR 2026-Q4: one-character near-miss of "${ioc.slice(0, 32)}" does not fire`, async () => {
+      const last = ioc[ioc.length - 1];
+      const nearMiss = ioc.slice(0, -1) + (last === 'x' ? 'y' : 'x');
+      const dir = mkPkg('near-miss', { [rel]: `const target = "${nearMiss}";\n` });
+      try {
+        const hits = (await scanIocStrings(dir)).filter(t => t.type === 'ioc_string_match');
+        assert(hits.length === 0, `near-miss ${nearMiss} must not fire, got ${hits.map(h => h.evidence).join(',')}`);
+      } finally { rmrf(dir); }
+    });
+  }
+
+  await asyncTest('IOC-STR 2026-Q4: the real macOS daemon label com.apple.sysmond does not fire', async () => {
+    // The trojanized Claude Code extension used com.apple.sysmond as a fake
+    // LaunchAgent label, but it is also the label of a genuine macOS daemon:
+    // it was deliberately left out of the IOC list (inclusion criterion #4).
+    const dir = mkPkg('mac-monitor', {
+      'index.js': 'const label = "com.apple.sysmond";\nmodule.exports = { label, user: "svc-telemetry" };\n'
+    });
+    try {
+      const hits = (await scanIocStrings(dir)).filter(t => t.type === 'ioc_string_match');
+      assert(hits.length === 0, `benign sysmond reference must not fire, got ${hits.map(h => h.evidence).join(',')}`);
+    } finally { rmrf(dir); }
+  });
 }
 
 module.exports = { runIocStringsTests };
