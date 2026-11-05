@@ -53,6 +53,8 @@ const { runPhantomGypTests } = require('./scanner/phantom-gyp.test');
 const { runNativeDropExecTests } = require('./scanner/native-drop-exec.test');
 const { runBinarySourceTests } = require('./scanner/binary-source.test');
 const { runTyposquatTests } = require('./scanner/typosquat.test');
+const { runAuditTyposquatFindingsTests } = require('./audit-2026-05/typosquat-findings.test');
+const { runAuditMonorepoFindingsTests } = require('./audit-2026-05/monorepo-findings.test');
 const { runDependencyTests } = require('./scanner/dependency.test');
 const { runIocStringsTests } = require('./scanner/ioc-strings.test');
 const { runAntiForensicTests } = require('./scanner/anti-forensic.test');
@@ -180,11 +182,14 @@ const { runTriageTests } = require('./integration/triage.test');
 const { runTriageGtTests } = require('./integration/triage-gt.test');
 const { runSandboxGateTests } = require('./integration/sandbox-gate.test');
 const { runSandboxDecisionTests } = require('./unit/sandbox-decision.test');
+const { runSandboxCompoundTriggersTests } = require('./unit/sandbox-compound-triggers.test');
+const { runMonitorFeedTests } = require('./integration/monitor-feed.test');
 const { runOomDetectionsJsonlTests } = require('./integration/oom-detections-jsonl.test');
 const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 
 // Meta tests (test-suite quality guards)
 const { runNoSourceGrepTests } = require('./meta/no-source-grep.test');
+const { runNoOrphanTestsTests } = require('./meta/no-orphan-tests.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -227,6 +232,9 @@ async function timed(name, fn) {
   await timed('native-drop-exec', runNativeDropExecTests);
   await timed('binary-source', runBinarySourceTests);
   await timed('typosquat', runTyposquatTests);
+  // Audit 2026-05 FIXED guards (RT-C1 compound, F13 cap end to end, monorepo scanner).
+  await timed('audit-typosquat-findings', runAuditTyposquatFindingsTests);
+  await timed('audit-monorepo-findings', runAuditMonorepoFindingsTests);
 
   // Integration tests (CLI spawns processes but uses small fixtures)
   await timed('cli', runCliTests);
@@ -442,6 +450,12 @@ async function timed(name, fn) {
   // Sandbox waste-cut decision tests (memory-skip + native-binary-shard skip)
   await timed('sandbox-decision', runSandboxDecisionTests);
 
+  // Sandbox compound triggers (src/sandbox/compound-triggers.js, wired in processor.js)
+  // and the monitor threat feed. Both files existed since v2.11.7 but were never
+  // registered here, so `npm test` never ran them (test audit 2026-11).
+  await timed('sandbox-compound-triggers', runSandboxCompoundTriggersTests);
+  await timed('monitor-feed', runMonitorFeedTests);
+
   // Monitor memory management tests (OOM prevention)
   await timed('monitor-memory', runMonitorMemoryTests);
 
@@ -464,6 +478,7 @@ async function timed(name, fn) {
 
   // Meta tests (test-suite quality guards — runs last, fast, no fixtures)
   await timed('meta-no-source-grep', runNoSourceGrepTests);
+  await timed('meta-no-orphan-tests', runNoOrphanTestsTests);
 
   // Drain any still-pending asyncTest promises before the tally — a floating
   // asyncTest (missing await) must never have its result killed by process.exit.
