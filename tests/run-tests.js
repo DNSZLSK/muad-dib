@@ -110,6 +110,7 @@ const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
 const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroboration.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
+const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runFpClustersTests } = require('./unit/fp-clusters.test');
 const { runRegressionCheckTests } = require('./unit/regression-check.test');
@@ -383,6 +384,7 @@ async function timed(name, fn) {
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
+  await timed('fp-cap-vetoes', runFpCapVetoTests);
 
   // FP cluster aggregation (FPR Improvement Plan - Chantier 1)
   await timed('fp-clusters', runFpClustersTests);
