@@ -522,6 +522,11 @@ const PLAYBOOKS = {
     'NE PAS installer. Ouvrir le fichier dans un editeur affichant les caracteres invisibles ' +
     '(VS Code: "editor.renderControlCharacters") pour inspecter le contenu reel.',
 
+  pth_exec_payload:
+    'CRITIQUE: Le paquet livre un fichier .pth dont une ligne "import ..." decode, lance un processus, ouvre le reseau ou execute du code dynamique. ' +
+    'Python l\x27execute a chaque demarrage, dans tous les processus, tant que le paquet est installe. NE PAS installer. Si deja installe: supprimer le .pth de site-packages, ' +
+    'desinstaller le paquet, verifier les autres .pth (python -c "import site; print(site.getsitepackages())"), rotation des credentials.',
+
   pyast_setup_cmdclass_override:
     'CRITIQUE: setup.py (cmdclass={...}) ou pyproject.toml ([tool.setuptools.cmdclass]) override une commande install-time. La classe custom va executer ' +
     'son .run() pendant pip install — RCE direct sur la machine de l\'utilisateur. C\'est le vecteur ' +

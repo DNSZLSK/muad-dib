@@ -51,6 +51,7 @@ const fs = require('fs');
 const path = require('path');
 const { countInvisibleUnicode, stripInvisibleUnicode } = require('../shared/unicode-invisibles.js');
 const { detectAnalyzerHoneytoken } = require('./ast-detectors/anti-evasion.js');
+const { findFiles } = require('../utils.js');
 
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB cap, cohérent avec ai-config.js
 
@@ -274,8 +275,105 @@ function detectPythonEnvMarkerEnumeration(content) {
  * @param {string} targetPath
  * @returns {Array<{type: string, severity: string, message: string, file: string}>}
  */
-function scanPythonSource(targetPath) {
+// PYSRC-011: executable line of a shipped .pth file. site.py runs every .pth line that
+// starts with "import " or "import\t" (no leading whitespace) at EVERY interpreter start,
+// in every process, not only at install. LiteLLM 1.107.0 (2026-03) shipped litellm_init.pth
+// with a base64 exec stealer; until now .pth files were only hashed, never read, so any new
+// variant was invisible. Benign shipped .pth files exist (coverage a1_coverage.pth exec of a
+// string literal, setuptools distutils-precedence.pth __import__('_distutils_hack'),
+// namespace *-nspkg.pth __import__('importlib.util')), so a bare executable line is not
+// reported: only one that decodes, spawns a process, opens the network, or runs dynamic code.
+const PTH_EXEC_LINE_RE = /^import[ \t]/;
+const PTH_DANGER_RES = [
+  ['decoding', /\b(?:b64decode|b32decode|b16decode|b85decode|a85decode|decodebytes|base64|zlib|marshal|lzma|bz2|fromhex|rot_?13|codecs\.decode)\b/],
+  ['process', /\b(?:subprocess|os\.system|os\.popen|os\.exec\w*|os\.spawn\w*|os\.posix_spawn\w*|pty\.spawn|ctypes)\b/],
+  ['network', /\b(?:urllib|urlopen|socket|http\.client|requests|httpx|aiohttp)\b/],
+  // exec/eval/compile of anything but a plain (non f-) string literal.
+  ['dynamic code', /\b(?:exec|eval|compile)\s*\(\s*(?![rbuRBU]{0,2}['"])/],
+  // getattr(__import__('os'), 'sys' + 'tem'): attribute access by computed name.
+  ['dynamic attribute', /\bgetattr\s*\(/],
+  // __import__ of anything but a single dotted-name literal (concatenation, variable, chr()...).
+  ['dynamic import', /\b__import__\s*\(\s*(?![rbuRBU]{0,2}(['"])[\w.]+\1\s*\))/]
+];
+const MAX_PTH_FILES = 200;
+
+// Python string literal (single-line forms), with its prefix. Content of non-f strings is
+// replaced by "s" before matching, so words inside text ("Failed to setup subprocess
+// coverage" in pytest-cov.pth) are not read as code. f-strings are evaluated, so they are
+// kept as they are.
+const PY_STRING_RE = /([rbuRBUfF]{0,2})(['"])((?:\\.|(?!\2).)*)\2/g;
+// Body of exec/eval/compile called on a plain string literal: that body IS code, analyzed
+// in turn (so exec('import subprocess') still fires).
+const PY_EXEC_LITERAL_RE = /\b(?:exec|eval|compile)\s*\(\s*[rbuRBU]{0,2}(['"])((?:\\.|(?!\1).)*)\1/g;
+const MAX_EXEC_NESTING = 3;
+
+function neutralizeStrings(code) {
+  return code.replace(PY_STRING_RE, (m, prefix, q) => (/[fF]/.test(prefix) ? m : `${q}s${q}`));
+}
+
+function unescapePy(s) {
+  return s.replace(/\\(n|t|r|\\|'|")/g, (m, c) => ({ n: '\n', t: '\t', r: '\r', '\\': '\\', '\'': '\'', '"': '"' }[c]));
+}
+
+// The line plus the code bodies of literal exec/eval/compile calls, nested up to 3 levels.
+function pthCodeSegments(line) {
+  const segments = [line];
+  let frontier = [line];
+  for (let depth = 0; depth < MAX_EXEC_NESTING && frontier.length > 0; depth++) {
+    const next = [];
+    for (const seg of frontier) {
+      for (const m of seg.matchAll(PY_EXEC_LITERAL_RE)) next.push(unescapePy(m[2]));
+    }
+    segments.push(...next);
+    frontier = next;
+  }
+  return segments;
+}
+
+function pthDangerHits(line) {
+  const hits = new Set();
+  for (const seg of pthCodeSegments(line)) {
+    const code = neutralizeStrings(seg);
+    for (const [label, re] of PTH_DANGER_RES) if (re.test(code)) hits.add(label);
+  }
+  return [...hits];
+}
+
+function scanPthFiles(targetPath) {
   const threats = [];
+  let files;
+  try {
+    files = findFiles(targetPath, { extensions: ['.pth'], excludedDirs: ['node_modules', '.git', '.muaddib-cache'], maxFiles: MAX_PTH_FILES });
+  } catch {
+    return threats;
+  }
+  for (const file of files) {
+    let content;
+    try {
+      const st = fs.lstatSync(file);
+      if (!st.isFile() || st.size === 0 || st.size > MAX_FILE_SIZE) continue;
+      content = fs.readFileSync(file, 'utf8');
+    } catch { continue; }
+    const relPath = path.relative(targetPath, file);
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.replace(/\s+$/, '');
+      if (!PTH_EXEC_LINE_RE.test(line)) continue;
+      const hits = pthDangerHits(line);
+      if (hits.length === 0) continue;
+      threats.push({
+        type: 'pth_exec_payload',
+        severity: 'CRITICAL',
+        message: `${relPath}: executable .pth line (run by site.py at every Python start) with ${hits.join(', ')}: "${line.slice(0, 120)}"`,
+        file: relPath
+      });
+      break; // one finding per file
+    }
+  }
+  return threats;
+}
+
+function scanPythonSource(targetPath) {
+  const threats = scanPthFiles(targetPath);
 
   const files = findTargetPythonFiles(targetPath);
   if (files.length === 0) return threats;
@@ -423,6 +521,7 @@ module.exports = {
   scanPythonSource,
   // Exported for unit testing of the helpers in isolation.
   _internal: {
+    scanPthFiles,
     findTargetPythonFiles,
     stripPythonComments,
     stripTripleQuotedStrings,

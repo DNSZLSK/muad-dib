@@ -188,7 +188,8 @@ const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
   'pyast_module_level_subprocess_shell',
   'pyast_module_level_unsafe_deserialization',
   'pyast_setup_cmdclass_override',
-  'pyast_ctypes_shellcode_load'
+  'pyast_ctypes_shellcode_load',
+  'pth_exec_payload'
 ]);
 
 module.exports = { PYPI_IMPORT_TIME_RCE_TYPES, REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };

@@ -65,6 +65,7 @@ const { runPythonTests } = require('./scanner/python.test');
 const { runPythonSourceTests } = require('./scanner/python-source.test');
 const { runPythonAstTests } = require('./scanner/python-ast.test');
 const { runPyprojectCmdclassTests } = require('./scanner/pyproject-cmdclass.test');
+const { runPthPayloadTests } = require('./scanner/pth-payload.test');
 const { runPyPIRegistryTests } = require('./scanner/pypi-registry.test');
 const { runPyPIMaintainerTests } = require('./scanner/pypi-maintainer.test');
 const { runPyPIReleaseZeroTests } = require('./scanner/pypi-release-zero.test');
@@ -255,6 +256,7 @@ async function timed(name, fn) {
   await timed('python-source', runPythonSourceTests);
   await timed('python-ast', runPythonAstTests);
   await timed('pyproject-cmdclass', runPyprojectCmdclassTests);
+  await timed('pth-payload', runPthPayloadTests);
   await timed('pypi-registry', runPyPIRegistryTests);
   await timed('pypi-maintainer', runPyPIMaintainerTests);
   await timed('pypi-release-zero', runPyPIReleaseZeroTests);

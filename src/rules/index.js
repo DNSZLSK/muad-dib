@@ -402,6 +402,21 @@ const RULES = {
     mitre: 'T1105'
   },
 
+  // PYSRC-011 — executable line of a shipped .pth file (LiteLLM 1.107.0, mars 2026).
+  pth_exec_payload: {
+    id: 'MUADDIB-PYSRC-011',
+    name: 'Python .pth Start-up Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un fichier .pth livre dans le paquet contient une ligne executable (commencant par "import ") qui decode (base64/zlib/marshal...), lance un processus, ouvre le reseau ou execute du code dynamique. site.py execute ces lignes a chaque demarrage de Python, dans tous les processus. Pattern LiteLLM 1.107.0 (litellm_init.pth, stealer base64). Les .pth legitimes (coverage, distutils-precedence, namespace nspkg) n\x27utilisent que des litteraux et des imports simples et ne declenchent pas.',
+    references: [
+      'https://docs.python.org/3/library/site.html',
+      'https://attack.mitre.org/techniques/T1546/'
+    ],
+    mitre: 'T1546'
+  },
+
   // PYAST-001 a 008 — Python AST scanner via tree-sitter (TrapDoor PyPI parity,
   // v2.11.42+). Mirror du `ast.js` cote npm : full CST walk avec scope tracking,
   // detecteurs scope-aware. Coexiste avec PYSRC-001..008 (regex) en defense
