@@ -31,6 +31,7 @@
  */
 
 const { PYPI_IMPORT_TIME_RCE_TYPES } = require('../shared/constants.js');
+const { HIGH_CONFIDENCE_MALICE_TYPES } = require('../monitor/classify.js');
 
 // Top threat types by frequency in production (covers ~95% of all findings).
 // Types not in this list are aggregated into `threat_type_other`.
@@ -283,8 +284,15 @@ function networkDestinationFirstParty(result, meta) {
   const hosts = extractHostsFromThreats(threats);
   // No destination host was observable (scanner saw the network sink but
   // no URL literal leaked into threat messages). Accept as first-party only
-  // when the package identity alone is a strong signal (scoped SDK).
-  if (hosts.size === 0) return scope !== null && SCOPE_FIRST_PARTY_DOMAINS[scope] !== undefined;
+  // when the package identity alone is a strong signal (scoped SDK) AND no
+  // high-confidence malice finding contradicts it: the scope is a presumption,
+  // not proof. A hijacked maintainer account publishes inside the legitimate
+  // scope; without this, an @openai/* package spawning a detached process to
+  // send NPM_TOKEN to a third-party host (score 95) was capped at 30.
+  if (hosts.size === 0) {
+    if (threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type))) return false;
+    return scope !== null && SCOPE_FIRST_PARTY_DOMAINS[scope] !== undefined;
+  }
 
   for (const h of hosts) {
     if (!hostMatchesSuffix(h, firstParty)) return false;
@@ -519,14 +527,20 @@ function getDescription(meta) {
 }
 
 /**
- * Feature 5 — TRUE iff a `typosquat_detected` threat fires on a scoped
- * package (`@scope/name`). Rationale: the typosquat rule computes edit
- * distance on the bare name (`@vendor/client-foo` -> `client-foo`) and
- * will sometimes treat `@scope/adapter-rubrik` as a typosquat of the
- * unscoped `rubrik`. Scoping implies a separate namespace, so the
- * collision is structurally false.
+ * Feature 5 — TRUE iff a `typosquat_detected` threat fires and the scanned
+ * (host) package is scoped (`@scope/name`).
  *
- * Covers 52 FP (2.5%) on the VPS extended corpus.
+ * Original rationale (v2.10.96): the typosquat rule would treat
+ * `@scope/adapter-rubrik` as a typosquat of `rubrik`. That case no longer
+ * exists: in `muaddib scan`, `typosquat_detected` is only emitted for
+ * DEPENDENCIES and `findTyposquatMatch` skips every scoped name.
+ *
+ * Actual effect (measured 2026-11-07): when the host is scoped, the points of
+ * its unscoped dependency typosquats (and of `lifecycle_typosquat`) are
+ * removed. On the validation corpus this shields 127 scoped packages
+ * (122 FP_probable, 5 unresolved, 0 TP) from dependency-typosquat noise, so it
+ * is kept; the cost is that anyone who creates a scope gets the same
+ * reduction. Pinned by tests/integration/e2e-fp-caps.test.js.
  */
 function typosquatScopedPackage(result, meta) {
   const threats = (result && result.threats) || [];
