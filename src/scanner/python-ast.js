@@ -69,6 +69,7 @@ const WASM_PATH = path.join(__dirname, '..', 'vendor', 'tree-sitter-python.wasm'
 const { _internal: pysrcInternal } = require('./python-source.js');
 const { findTargetPythonFiles } = pysrcInternal;
 const { networkDestinationsAllBenign } = require('../sdk-destination.js');
+const { scanPyprojectCmdclass } = require('./python-ast-detectors/pyproject-cmdclass.js');
 
 // ---------------------------------------------------------------------------
 // Async tree-sitter init (lazy, cached).
@@ -126,8 +127,9 @@ async function initPythonParser() {
 // ---------------------------------------------------------------------------
 
 function scanPythonAST(targetPath) {
-  if (!parserInstance) return []; // init didn't run or failed — silently skip
-  const threats = [];
+  // pyproject.toml cmdclass needs no Python parser: run it even if the WASM init failed.
+  const threats = scanPyprojectCmdclass(targetPath);
+  if (!parserInstance) return threats; // init didn't run or failed, Python AST part skipped
 
   const files = findTargetPythonFiles(targetPath);
   if (files.length === 0) return threats;

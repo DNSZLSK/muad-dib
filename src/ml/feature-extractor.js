@@ -30,6 +30,8 @@
  * Output: flat object with numeric/boolean values suitable for XGBoost/RF.
  */
 
+const { PYPI_IMPORT_TIME_RCE_TYPES } = require('../shared/constants.js');
+
 // Top threat types by frequency in production (covers ~95% of all findings).
 // Types not in this list are aggregated into `threat_type_other`.
 // v2.10.32: expanded from 31 to 47 types — code exec bypasses, IoC, GlassWorm,
@@ -452,7 +454,11 @@ const VECTOR_TYPES = new Set([
   'download_exec_binary',
   'fetch_decrypt_exec',
   'suspicious_domain',
-  'reverse_shell'
+  'reverse_shell',
+  // PyPI install/import-time execution (setup.py or pyproject cmdclass, module-level exec,
+  // subprocess...). Without them F8 capped an obfuscated PyPI payload WITH an install hook
+  // at 35, as if it had no execution vector (pybitjs@0.1.0).
+  ...PYPI_IMPORT_TIME_RCE_TYPES
 ]);
 
 // Threats that indicate a network egress capability somewhere in the

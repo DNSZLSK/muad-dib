@@ -10,7 +10,7 @@
   "scannerFiles": 36,
   "astDetectors": 15,
   "moduleGraph": 9,
-  "pythonAstDetectors": 6,
-  "testFiles": 157,
+  "pythonAstDetectors": 7,
+  "testFiles": 158,
   "tests": 4545
 }

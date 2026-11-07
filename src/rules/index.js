@@ -411,11 +411,11 @@ const RULES = {
   // fetch->exec, base64->exec, ctypes shellcode, env->network).
   pyast_setup_cmdclass_override: {
     id: 'MUADDIB-PYAST-001',
-    name: 'setup.py cmdclass Override',
+    name: 'setup.py / pyproject.toml cmdclass Override',
     severity: 'CRITICAL',
     confidence: 'high',
     domain: 'malware',
-    description: 'setup.py contient setup(cmdclass={...}) qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
+    description: 'setup.py contient setup(cmdclass={...}), ou pyproject.toml declare [tool.setuptools.cmdclass] (meme effet, setuptools >= 61), qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
     references: [
       'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
       'https://securitylabs.datadoghq.com/articles/guarddog-identify-malicious-pypi-packages/',

@@ -523,7 +523,7 @@ const PLAYBOOKS = {
     '(VS Code: "editor.renderControlCharacters") pour inspecter le contenu reel.',
 
   pyast_setup_cmdclass_override:
-    'CRITIQUE: setup.py override une commande install-time via cmdclass={...}. La classe custom va executer ' +
+    'CRITIQUE: setup.py (cmdclass={...}) ou pyproject.toml ([tool.setuptools.cmdclass]) override une commande install-time. La classe custom va executer ' +
     'son .run() pendant pip install — RCE direct sur la machine de l\'utilisateur. C\'est le vecteur ' +
     '#1 des supply chain attacks PyPI (TrapDoor mai 2026, Lazarus, SilentSync). NE PAS installer. ' +
     'Inspecter la classe override pour identifier le payload (subprocess, urllib, exec, ecriture de fichiers ' +
