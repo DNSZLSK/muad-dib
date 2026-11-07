@@ -112,6 +112,7 @@ const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroborat
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
 const { runScoringGuardTests } = require('./unit/scoring-guards.test');
+const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runFpClustersTests } = require('./unit/fp-clusters.test');
 const { runRegressionCheckTests } = require('./unit/regression-check.test');
@@ -387,6 +388,7 @@ async function timed(name, fn) {
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
   await timed('fp-cap-vetoes', runFpCapVetoTests);
   await timed('scoring-guards', runScoringGuardTests);
+  await timed('dilution-thresholds', runDilutionThresholdTests);
 
   // FP cluster aggregation (FPR Improvement Plan - Chantier 1)
   await timed('fp-clusters', runFpClustersTests);
