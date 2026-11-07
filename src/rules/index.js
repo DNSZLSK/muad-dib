@@ -1228,6 +1228,16 @@ const RULES = {
     ],
     mitre: 'T1554'
   },
+  parser_divergence: {
+    id: 'MUADDIB-AST-098',
+    name: 'Analyzer Parser Divergence',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    domain: 'malware',
+    description: 'Fichier accepte par Node.js (node --check sur stdin, module puis CommonJS) mais rejete par le parseur acorn de l\'analyseur : les scanners AST et dataflow n\'ont pas analyse ce fichier. Un attaquant qui ecrit son payload dans une syntaxe que V8 accepte et qu\'acorn refuse rend le code invisible a l\'analyse statique. Signal composite (MEDIUM) : une syntaxe recente non encore supportee par acorn le declenche aussi sur du code legitime.',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
   detached_process: {
     id: 'MUADDIB-AST-012',
     name: 'Detached Background Process',

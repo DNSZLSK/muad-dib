@@ -119,7 +119,9 @@ function getMaxFileSize() { return _maxFileSize; }
 function setMaxFileSize(size) { _maxFileSize = size; }
 /** Reset max file size to default. */
 function resetMaxFileSize() { _maxFileSize = MAX_FILE_SIZE; }
-const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true };
+// 2026: import attributes, RegExp modifiers, duplicate named groups (2025), using / await using (2026).
+// Pinned, not 'latest', so an acorn upgrade cannot silently change what the scanners parse.
+const ACORN_OPTIONS = { ecmaVersion: 2026, sourceType: 'module', allowHashBang: true };
 
 const acorn = require('acorn');
 const crypto = require('crypto');
@@ -153,7 +155,8 @@ function safeParse(code, extraOptions = {}) {
     ast = acorn.parse(code, opts);
   } catch {
     try {
-      ast = acorn.parse(code, { ...opts, sourceType: 'script' });
+      // CommonJS runs inside a function wrapper: a top-level return is valid for Node.
+      ast = acorn.parse(code, { ...opts, sourceType: 'script', allowReturnOutsideFunction: true });
     } catch {
       ast = null;
     }

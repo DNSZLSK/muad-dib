@@ -88,6 +88,7 @@ const { runAstReconTests } = require('./scanner/ast-recon.test');
 const { runCryptoExfilTests } = require('./scanner/crypto-exfil.test');
 const { runCryptoExfilPythonTests } = require('./scanner/crypto-exfil-python.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
+const { runAstParserDivergenceTests } = require('./scanner/ast-parser-divergence.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
 const { runTrustedDepDiffTests } = require('./scanner/trusted-dep-diff.test');
 
@@ -304,6 +305,7 @@ async function timed(name, fn) {
   await timed('crypto-exfil', runCryptoExfilTests);
   await timed('crypto-exfil-python', runCryptoExfilPythonTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
+  await timed('ast-parser-divergence', runAstParserDivergenceTests);
   await timed('trusted-dep-diff', runTrustedDepDiffTests);
 
   // IOC scraper tests (Phase 3)
