@@ -21,6 +21,39 @@ const path = require('path');
 const { isDevFile, findJsFiles, forEachSafeFile } = require('../utils.js');
 const { looksBinaryString } = require('./binary-sniff.js');
 
+// Files reachable from the package entry points (main, bin, exports, module, browser,
+// lifecycle targets, and what they require or spawn) are EXECUTED code, so the dev-file
+// filter must not drop them. isDevFile skips tools/, build/, docs/, examples/, fixtures/,
+// compiler/, benchmark* and any *test.js / *spec.js: a reverse shell set as
+// "main": "latest.js" or "main": "tools/index.js", or as a bin in docs/, scored 0.
+// Unreachable files keep the filter.
+// Not done here (measured 2026-11-08): also scanning the reachable files of dist/, build/,
+// out/ and output/ (excluded by findJsFiles). On the validation sample it pushed agent/CLI
+// tools to >= 75 through the same imprecise rules as RC-H1 (detached_process,
+// mcp_config_injection, ci_environment_probe) with no TP gained; it waits for those rules.
+const MAX_EXECUTED_FILES = 500;
+let _executedCache = { target: null, rel: new Set() };
+
+function executedFiles(targetPath) {
+  if (_executedCache.target === targetPath) return _executedCache.rel;
+  const rel = new Set();
+  try {
+    // Lazy require: reachability -> module-graph pulls acorn; keep this module light.
+    const { computeReachableFiles } = require('../scanner/reachability.js');
+    const { reachableFiles } = computeReachableFiles(targetPath);
+    for (const r of reachableFiles) {
+      const p = String(r).split(path.sep).join('/');
+      if (p.split('/').includes('node_modules')) continue;
+      rel.add(p);
+      if (rel.size >= MAX_EXECUTED_FILES) break;
+    }
+  } catch {
+    // Reachability failure: keep the plain dev-file filter (previous behavior).
+  }
+  _executedCache = { target: targetPath, rel };
+  return rel;
+}
+
 /**
  * Shared scanner wrapper: iterates JS files, runs analyzeFileFn on original + deobfuscated code,
  * deduplicates findings by type::message key.
@@ -35,12 +68,13 @@ const { looksBinaryString } = require('./binary-sniff.js');
 function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   const threats = [];
   const files = findJsFiles(targetPath);
+  const executed = executedFiles(targetPath);
 
   forEachSafeFile(files, (file, content) => {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
 
     if (options.excludedFiles && options.excludedFiles.includes(relativePath)) return;
-    if (options.skipDevFiles !== false && isDevFile(relativePath)) return;
+    if (options.skipDevFiles !== false && isDevFile(relativePath) && !executed.has(relativePath)) return;
 
     // .d.ts files: strip TypeScript declaration syntax before JS parsing.
     // Legitimate .d.ts files contain only type declarations (no executable code).

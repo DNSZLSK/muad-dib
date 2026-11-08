@@ -115,6 +115,7 @@ const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
 const { runE2EScoringGuardTests } = require('./integration/e2e-scoring-guards.test');
 const { runE2EFpCapTests } = require('./integration/e2e-fp-caps.test');
+const { runExecutedFilesTests } = require('./integration/executed-files.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runFpClustersTests } = require('./unit/fp-clusters.test');
 const { runRegressionCheckTests } = require('./unit/regression-check.test');
@@ -393,6 +394,7 @@ async function timed(name, fn) {
   await timed('dilution-thresholds', runDilutionThresholdTests);
   await timed('e2e-scoring-guards', runE2EScoringGuardTests);
   await timed('e2e-fp-caps', runE2EFpCapTests);
+  await timed('executed-files', runExecutedFilesTests);
 
   // FP cluster aggregation (FPR Improvement Plan - Chantier 1)
   await timed('fp-clusters', runFpClustersTests);
