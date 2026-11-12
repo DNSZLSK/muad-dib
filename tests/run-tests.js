@@ -160,6 +160,7 @@ const { runGroundTruthSmokeTests } = require('./integration/ground-truth-smoke.t
 const { runV266FixesTests } = require('./integration/v266-fixes.test');
 const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test');
 const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
+const { runF10VendorCliE2ETests } = require('./integration/f10-vendor-cli-e2e.test');
 const { runSingleFireCriticalFloorTests } = require('./integration/single-fire-critical-floor.test');
 const { runDecayAggregationTests } = require('./integration/decay-aggregation.test');
 const { runCompoundReplacementTests } = require('./integration/compound-replacement.test');
@@ -342,6 +343,7 @@ async function timed(name, fn) {
 
   // Compound scoring tests (v2.9.2)
   await timed('compound-scoring', runCompoundScoringTests);
+  await timed('f10-vendor-cli-e2e', runF10VendorCliE2ETests);
 
   // Hybrid v3 Phase 1: single-fire critical floor
   await timed('single-fire-critical-floor', runSingleFireCriticalFloorTests);
