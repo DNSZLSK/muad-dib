@@ -20,6 +20,7 @@
 const path = require('path');
 const walk = require('acorn-walk');
 const { safeParse } = require('../shared/constants.js');
+const { nodeAcceptsSyntax, resetNodeSyntaxBudget } = require('../shared/node-syntax-check.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 const {
   handleVariableDeclarator,
@@ -72,6 +73,7 @@ const EXCLUDED_FILES = [
 ];
 
 async function analyzeAST(targetPath, options = {}) {
+  resetNodeSyntaxBudget();
   return analyzeWithDeobfuscation(targetPath, analyzeFile, {
     deobfuscate: options.deobfuscate,
     excludedFiles: EXCLUDED_FILES
@@ -85,6 +87,17 @@ function analyzeFile(content, filePath, basePath) {
   ast = safeParse(content);
   if (!ast) {
     // AST parse failed — apply regex fallback for known dangerous patterns
+
+    // Parser divergence: Node.js runs this file but acorn rejects it, so the AST and dataflow
+    // scanners are blind on it. Checked only for files acorn rejects (bounded per scan).
+    if (nodeAcceptsSyntax(content) === true) {
+      threats.push({
+        type: 'parser_divergence',
+        severity: 'MEDIUM',
+        message: 'Node.js accepts this file but the analyzer parser (acorn) rejects it: AST and dataflow analysis did not run on it.',
+        file: path.relative(basePath, filePath)
+      });
+    }
 
     // Workflow manipulation: reads + writes to .github/workflows
     if (/\.github/.test(content) && /workflows/.test(content) &&

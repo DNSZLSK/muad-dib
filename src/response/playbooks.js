@@ -205,6 +205,10 @@ const PLAYBOOKS = {
   dangerous_call_function:
     'Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.',
 
+  parser_divergence:
+    'Le fichier s\'execute sous Node.js mais n\'a pas ete analyse (parseur acorn en echec). ' +
+    'Lire le fichier manuellement, en priorite s\'il est atteint par un script d\'installation ou par main/bin.',
+
   possible_obfuscation:
     'Fichier potentiellement obfusque (parse echoue, code dense). Analyser manuellement.',
 
