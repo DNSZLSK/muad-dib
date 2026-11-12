@@ -172,4 +172,24 @@ function clearASTCache() {
   _astCache.clear();
 }
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
+// PyPI install-time / import-time code execution: the PyPI equivalent of an npm install
+// hook. Emitted only by the Python scanners (python-source.js, python-ast-detectors), so
+// their presence is itself the PyPI signal. Shared by scoring.js (MT-1 ceiling bypass) and
+// ml/feature-extractor.js (VECTOR_TYPES of the F8 obfuscation_without_vector cap), so the two
+// lists cannot drift apart.
+const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
+  'import_time_exec',
+  'import_time_subprocess',
+  'import_time_os_system',
+  'import_time_deserialization',
+  'import_time_fetch_exec',
+  'fetch_to_fork_exec_inline',
+  'pyast_module_level_exec',
+  'pyast_module_level_subprocess_shell',
+  'pyast_module_level_unsafe_deserialization',
+  'pyast_setup_cmdclass_override',
+  'pyast_ctypes_shellcode_load',
+  'pth_exec_payload'
+]);
+
+module.exports = { PYPI_IMPORT_TIME_RCE_TYPES, REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };

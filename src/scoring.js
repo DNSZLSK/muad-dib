@@ -219,21 +219,9 @@ const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
 // PyPI packages emit no `lifecycle_script` (an npm-only signal), so confirmed
 // import-time RCE would otherwise be capped at 35 and buried in the benign 25-35
 // cluster. These types are emitted ONLY by the Python scanners (python-source.js /
-// python-ast-detectors) on .py files, so their presence is itself the PyPI signal —
+// python-ast-detectors) on .py files and pyproject.toml, so their presence is itself the PyPI signal -
 // no ecosystem flag needed, and npm packages are unaffected (they never emit them).
-const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
-  'import_time_exec',
-  'import_time_subprocess',
-  'import_time_os_system',
-  'import_time_deserialization',
-  'import_time_fetch_exec',
-  'fetch_to_fork_exec_inline',
-  'pyast_module_level_exec',
-  'pyast_module_level_subprocess_shell',
-  'pyast_module_level_unsafe_deserialization',
-  'pyast_setup_cmdclass_override',
-  'pyast_ctypes_shellcode_load'
-]);
+const { PYPI_IMPORT_TIME_RCE_TYPES } = require('./shared/constants.js');
 
 // Track R: the reputation multiplier (applyReputationFactor) may suppress noise on
 // mature/popular packages down to ×0.10, but it must never pull a CONFIRMED malice

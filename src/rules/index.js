@@ -402,6 +402,21 @@ const RULES = {
     mitre: 'T1105'
   },
 
+  // PYSRC-011 — executable line of a shipped .pth file (LiteLLM 1.107.0, mars 2026).
+  pth_exec_payload: {
+    id: 'MUADDIB-PYSRC-011',
+    name: 'Python .pth Start-up Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un fichier .pth livre dans le paquet contient une ligne executable (commencant par "import ") qui decode (base64/zlib/marshal...), lance un processus, ouvre le reseau ou execute du code dynamique. site.py execute ces lignes a chaque demarrage de Python, dans tous les processus. Pattern LiteLLM 1.107.0 (litellm_init.pth, stealer base64). Les .pth legitimes (coverage, distutils-precedence, namespace nspkg) n\x27utilisent que des litteraux et des imports simples et ne declenchent pas.',
+    references: [
+      'https://docs.python.org/3/library/site.html',
+      'https://attack.mitre.org/techniques/T1546/'
+    ],
+    mitre: 'T1546'
+  },
+
   // PYAST-001 a 008 — Python AST scanner via tree-sitter (TrapDoor PyPI parity,
   // v2.11.42+). Mirror du `ast.js` cote npm : full CST walk avec scope tracking,
   // detecteurs scope-aware. Coexiste avec PYSRC-001..008 (regex) en defense
@@ -411,11 +426,11 @@ const RULES = {
   // fetch->exec, base64->exec, ctypes shellcode, env->network).
   pyast_setup_cmdclass_override: {
     id: 'MUADDIB-PYAST-001',
-    name: 'setup.py cmdclass Override',
+    name: 'setup.py / pyproject.toml cmdclass Override',
     severity: 'CRITICAL',
     confidence: 'high',
     domain: 'malware',
-    description: 'setup.py contient setup(cmdclass={...}) qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
+    description: 'setup.py contient setup(cmdclass={...}), ou pyproject.toml declare [tool.setuptools.cmdclass] (meme effet, setuptools >= 61), qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
     references: [
       'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
       'https://securitylabs.datadoghq.com/articles/guarddog-identify-malicious-pypi-packages/',
