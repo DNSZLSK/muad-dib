@@ -2351,27 +2351,21 @@ const _CRITICAL_PRELOAD_TYPES = new Set([
   'sandbox_network_after_sensitive_read',
   'sandbox_known_exfil_domain',
   'sandbox_timer_delay_critical',
-  'canary_exfiltration',
-  'sandbox_honey_read',
-  'sandbox_persistence_write',
-  'sandbox_npm_self_invoke',
-  'sandbox_runtime_deobfuscation_executed'
+  'canary_exfiltration'
 ]);
 
 const _HIGH_COMPOUND_TYPES = new Set([
   'sandbox_preload_sensitive_read',
   'sandbox_exec_suspicious',
-  'sandbox_network_outlier',
-  'sandbox_execve_chain_depth',
-  'sandbox_credential_target_read'
+  'sandbox_network_outlier'
 ]);
 
 /**
  * Classify a sandbox run into a verdict and apply the score contract.
  *
  * Verdicts:
- *   - MALICIOUS_CONFIRMED: >=1 critical preload signal OR honey read correlated
- *     with non-registry outbound. Floor score at 75.
+ *   - MALICIOUS_CONFIRMED: >=1 critical preload signal (sensitive read then network,
+ *     known exfil domain, critical timer delay, canary exfiltration). Floor score at 75.
  *   - MALICIOUS_CHAIN: >=2 high-severity compound signals in the same run.
  *     Floor score at 60.
  *   - CLEAN_HIGH_CONFIDENCE: install completed, no fingerprint detected, no
@@ -2406,7 +2400,7 @@ function applySandboxVerdict(result, sandboxResult) {
   const criticalSignals = findingTypes.filter(t => _CRITICAL_PRELOAD_TYPES.has(t));
   const highSignals = findingTypes.filter(t => _HIGH_COMPOUND_TYPES.has(t));
 
-  // MALICIOUS_CONFIRMED: any single critical preload/honey signal is enough.
+  // MALICIOUS_CONFIRMED: any single critical preload signal is enough.
   if (criticalSignals.length >= 1) {
     const newScore = Math.max(oldScore, SANDBOX_VERDICT_CONFIRMED_FLOOR);
     result.summary.riskScore = newScore;

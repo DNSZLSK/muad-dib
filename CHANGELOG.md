@@ -37,11 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - Tests in `tests/scanner/dataflow.test.js` (8): the destructured-parameter, inherited-member and weak-source tests fail on the previous code; the adversarial dynamic-env and identity-beacon tests fail if their exclusion is removed.
 
+- **GT-018 (mathjs-min) expected severities.** The entry required a MEDIUM or HIGH finding, so the replay marked the sample failed although MUAD'DIB reports it with a CRITICAL `suspicious_dataflow` (Discord token read + webhook exfiltration, a real grabber). CRITICAL is the correct severity; the expectation now accepts it. Score-based metrics (TPR@3, TPR@20) are unaffected: they never read this field.
+
 ### Changed
 
 - **String IOCs are decisive only when the package corroborates them (`applyStringIocCorroboration`, `src/scoring.js`).** Corpus audit (72 string IOCs x 30 582 tarballs): of ~55 tarballs with a CRITICAL `ioc_string_match`, ~53 were benign, mostly security tools quoting IOCs in detectors, pattern lists and test fixtures, each floored to 75 by the single-fire floor. A string IOC is now decisive (single-fire floor 75 + MT-1 ceiling bypass from Track E) only when the package corroborates it: (1) behavioral evidence, meaning a non-LOW finding of a fixed type list (`HIGH_CONFIDENCE_MALICE_TYPES`, proven exfil sinks, hash / package-name IOCs) or a compound, anywhere in the package (the string IOC itself never counts); or (2) multiplicity, meaning >= 2 distinct CRITICAL strings of ONE campaign family. Uncorroborated matches keep their CRITICAL weight and lose only the floor and the bypass. **No path lowers a string-IOC severity:** an earlier "N unrelated families -> LOW catalog" rule was dropped after review, since one decoy string of another campaign would buy it for an IOC-only sample (adversarial test: a decoyed IOC-only sample stays above the alert threshold). Measured: GT replay 80/99 unchanged (WSL, frozen IOCs, no registry). 20 tests in `tests/unit/string-ioc-corroboration.test.js`; each condition, sabotaged one at a time, is caught.
 
 - **String IOC data (`iocs/string-iocs.yaml`, `src/ioc/yaml-loader.js`).** Optional `family` field (Shai-Hulud lineage, DPRK NullReceiver / PolinRider) used by the multiplicity rule. The loader now accepts `LOW` (previously any LOW silently became CRITICAL). `P-2024-001` removed (matched 3 unrelated benign packages, no malicious hit). The generic `huggingface.co/api/models` (41 benign packages in the corpus) and `getSignaturesForAddress` (18 benign, a real Solana web3.js method) go HIGH -> LOW (composite-only).
+
+### Removed
+
+- **Six sandbox rules that no code ever emitted (MUADDIB-SANDBOX-017..022).** `sandbox_honey_read`, `sandbox_credential_target_read`, `sandbox_persistence_write`, `sandbox_execve_chain_depth`, `sandbox_npm_self_invoke` and `sandbox_runtime_deobfuscation_executed` had a rule, a playbook and a sandbox-verdict scoring entry, but no emitter in `src/` or `docker/`, in any branch of the history (`git log --all -S`). The v2.11.7 entry below announced the analyzer signals, the 2026 network allowlist additions and the preload `Function` proxy that would produce them; none of these was implemented. Found by the 2026-11 test audit: their two test files (`tests/unit/sandbox-analyzer-2026.test.js`, `tests/integration/sandbox-2026-pipeline.test.js`) were never run by `npm test`, and 17 of their 24 tests failed; of the 7 that passed, 5 were negatives that pass vacuously when nothing is emitted and 2 duplicate assertions already in `tests/sandbox/sandbox.test.js` (safe domains) and `tests/unit/sandbox-compound-triggers.test.js` (no trigger on a benign package). Removed: the 6 rules, their playbooks, their entries in the sandbox verdict sets (`src/scoring.js`), the two test files and their orphan-guard allowlist entries. No detection change: the types were never produced, so no score can move. The rule count drops accordingly. Implementing these signals is a separate feature, to be shipped with its own tests.
 
 ### Added
 
@@ -941,6 +947,8 @@ fenetre de score `[15, 35]` (en-dessous = clean, au-dessus = deja definitif) :
 - `npm_token_self_use` : cible CanisterWorm self-publish
 
 **Analyzer preload : 5 nouveaux signaux**
+
+> **Correction (2026-11):** the 5 analyzer signals, the network allowlist additions and the preload `Function` proxy described in this section were never implemented. The corresponding rules (MUADDIB-SANDBOX-017..022) were removed in [Unreleased]. The 6 compound triggers of `src/sandbox/compound-triggers.js` above do exist.
 
 `src/sandbox/analyzer.js` reconnait 5 patterns supplementaires :
 
