@@ -30,8 +30,8 @@ const ALLOWLIST = new Map([
   // must be ported into the suite; the reproducers asserting a still-open bug cannot be
   // registered until the bug is fixed (they would lock the bug in).
   ['audit-2026-05/dataflow-findings.test.js', 'standalone audit reproducer, to port'],
-  ['audit-2026-05/reachability-findings.test.js', 'standalone audit reproducer, RC-C2/RC-H1..H3 still open'],
-  ['audit-2026-05/scoring-critical-findings.test.js', 'standalone audit reproducer, SC-C2.b/SC-C3 still open'],
+  ['audit-2026-05/reachability-findings.test.js', 'standalone audit reproducer, asserts known open issues'],
+  ['audit-2026-05/scoring-critical-findings.test.js', 'standalone audit reproducer, asserts known open issues'],
 ]);
 
 const toPosix = p => p.split(path.sep).join('/');
