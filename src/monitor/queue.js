@@ -399,6 +399,7 @@ function recordTrainingSample(result, params) {
       score: (result.summary && typeof result.summary.riskScore === 'number') ? result.summary.riskScore : null,
       tier: params.tier,
       maxSeverity: result.summary ? result.summary.riskLevel : null,
+      analysisStatus: result.summary ? result.summary.analysisStatus : undefined,
       types: [...new Set((result.threats || []).map(t => t.type))],
       sandbox: params.sandboxResult ? 'run' : 'none',
       source: 'scan',

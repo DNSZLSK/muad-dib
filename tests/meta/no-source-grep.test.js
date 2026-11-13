@@ -102,15 +102,15 @@ const ALLOWLIST = new Set([
   'tests/integration/gap-remediation.test.js:246',
   'tests/integration/gap-remediation.test.js:247',
   'tests/integration/audit-fixes.test.js:534',
-  'tests/integration/v266-fixes.test.js:70',
-  'tests/integration/v266-fixes.test.js:71',
+  'tests/integration/v266-fixes.test.js:62',
+  'tests/integration/v266-fixes.test.js:63',
 
   // ── Error-logging hygiene / resource cleanup: debug-gated module-graph error logging (debugLog,
-  // no empty catch) and module-graph timer cleanup are not observable without a debug harness; the
-  // graph's correct behavior is covered by tests/scanner/module-graph.test.js.
+  // no empty catch) is not observable without a debug harness; the graph's correct behavior is covered
+  // by tests/scanner/module-graph.test.js. (The module-graph timer is gone since the incompleteness
+  // contract, its timeout is tested behaviorally in tests/unit/incompleteness.test.js.)
   'tests/integration/audit-fixes.test.js:1225',
   'tests/integration/audit-fixes.test.js:1226',
-  'tests/integration/v266-fixes.test.js:53',
 ]);
 
 function runNoSourceGrepTests() {

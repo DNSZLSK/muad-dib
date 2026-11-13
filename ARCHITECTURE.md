@@ -86,20 +86,27 @@ Centralized constants in `src/scanner/module-graph/constants.js` + per-detector 
 
 | Constant | Value | File:line | Role |
 |---|---|---|---|
-| `MAX_GRAPH_NODES` | 5000 | `module-graph/constants.js:6` | Max files in dependency graph. Raised from 50 (v2.6.1) to 5000 in v2.11.x post-audit DF-C1 — now covers ~99.5% of npm packages. If exceeded, the graph build short-circuits and a warning is appended to scan result (`warnings[]`). |
-| `MAX_GRAPH_EDGES` | 400 | `module-graph/constants.js:7` | Max total import edges (prevents explosion on monorepos that still fit under node cap). |
-| `MAX_FLOWS` | 20 | `module-graph/constants.js:8` | Max `cross_file_dataflow` flows reported per package. Saturated flows are dropped silently in insertion order (audit DF-C2 — future fix: priority queue by severity). |
+| `MAX_GRAPH_NODES` | 5000 | `module-graph/constants.js` | Max files in dependency graph. Raised from 50 (v2.6.1) to 5000 in v2.11.x post-audit DF-C1 - now covers ~99.5% of npm packages. If exceeded, the graph build short-circuits, a `large_package_graph_truncated` finding and a warning are emitted, and the analysis is INCONCLUSIVE. |
+| `MAX_GRAPH_EDGES` | 400 | `module-graph/constants.js` | Max total import edges (prevents explosion on monorepos that still fit under node cap). Files after the one that crosses the bound are dropped from the graph (`meta.edgeTruncated`); the analysis is INCONCLUSIVE, since padding imports ahead of the real source/sink is enough to hide a flow. |
+| `MAX_FLOW_CANDIDATES` | 200 | `module-graph/constants.js` | Max raw direct flow candidates collected by `detectCrossFileFlows`, before the first-party destination filter. Reaching it makes the analysis INCONCLUSIVE. |
+| `MAX_FLOWS` | 20 | `module-graph/constants.js` | Max direct `cross_file_dataflow` flows reported per package, applied by the executor AFTER `filterFirstPartyNetworkFlows`. Before lot 1 the quota was applied first, so 20 decoys to a first-party destination consumed it and hid the real flow (audit 2026-09-29). |
 | `MAX_TAINT_DEPTH` | 50 | `module-graph/constants.js:9` | Max AST recursion depth in the walker (DoS guard against pathologically nested minified code). |
 | `MAX_PIPE_DEPTH` | 5 | `module-graph/detect-cross-file.js` | Walk depth for `.pipe()` chain taint following. |
 | `MAX_EMITTER_FLOWS` | 2 | `module-graph/detect-event-flows.js` | Cross-file EventEmitter flow cap per package (prevents explosion on event-heavy libraries). |
-| Module-graph timeout | 5 s | `src/pipeline/executor.js` | Hard timeout on the whole pre-analysis phase. Emits `module_graph_timeout` warning if exceeded. |
+| Module-graph budget | 5 s (`MUADDIB_MODULE_GRAPH_TIMEOUT_MS`) | `src/pipeline/executor.js` | Checked at step boundaries (every step is synchronous, so no timer can interrupt one). Past the deadline the remaining steps are skipped, the flows already produced still go through the destination filter, the result is published once, and the analysis is INCONCLUSIVE. Replaces a `Promise.race` that let the losing work keep mutating the flows after the scan moved on. |
 
 #### Bounded limits — intra-file dataflow (`src/scanner/dataflow.js`)
 
 | Constant | Value | File:line | Role |
 |---|---|---|---|
 | Source-sink proximity | 50 lines | `dataflow.js:987` | If `Math.abs(src.line - sink.line) < 50` → CRITICAL ; otherwise HIGH (graduation telemetry-only). Recovered to CRITICAL when `hasExposureSink && hasCredentialSource` regardless of distance. |
-| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; rejected scanners contribute an empty result + logged warning. |
+| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; a timed-out scanner marks the analysis INCONCLUSIVE. Known limit: these scanners are synchronous, so the timer cannot fire before they return (architecture lot 2). |
+
+### Incompleteness contract (architecture lot 1)
+
+The bounds above exist to cap work, but each one is also something an attacker can fill to hide a verdict. Each site that reaches a bound records it in `src/shared/completeness.js` (`markIncomplete(component, reason, { limit, observed })`, per-scan state cleared by `resetAll()` and at the start of `execute()`, deduplicated per `(component, reason)`, at most 32 entries). The processor turns a non-empty record into `analysis = { status: 'INCONCLUSIVE', incomplete: [...] }` and `summary.analysisStatus`, and adds one summary warning. Bounds that change the status: scanner timeout, module-graph timeout / error, node limit, edge limit, flow candidate limit, function BFS limit, 500-file cap. Per-file size skips do not (every large bundle would otherwise be INCONCLUSIVE and the signal would carry no information).
+
+The status is orthogonal to the score: `riskScore` and `riskLevel` are unchanged, so evaluate metrics and webhook/monitor consumers are unaffected. Outputs: CLI replaces the SAFE label and the `[OK] No threats detected` line, SARIF adds error-level `toolExecutionNotifications` (SARIF 2.1.0 Appendix I; `executionSuccessful` stays true, it is reserved for a tool that failed to start or crashed, §3.20.14), JSON carries the field, the monitor scan-ledger records `analysisStatus: 'INCONCLUSIVE'` (only when inconclusive, no routing change). The exit code is unchanged by default; `--fail-on-inconclusive` (opt-in) makes an INCONCLUSIVE scan exit >= 1 (`src/pipeline/outputter.js`).
 
 ## Scoring System
 
@@ -147,6 +154,7 @@ Source: `const CONFIDENCE_FACTORS = { high: 1.0, medium: 0.85, low: 0.6 };` appl
 |---|---|---|---|
 | `MAX_FN_REACH_FILES` | 250 | `reachability.js:370` | Max files processed by function-level reachability. Beyond this cap, the function-level BFS short-circuits and all threats remain considered live (fail-open). |
 | `MAX_FN_REACH_BYTES` | 1 MiB (1024×1024) | `reachability.js:371` | Per-file size cap. Files larger than 1 MB (typically minified bundles) are skipped — their threats remain live (fail-open). |
+| `MAX_FN_BFS_STEPS` | 5000 | `reachability.js` | Max functions dequeued by the intra-file BFS. If work is still queued at the bound, the file gets no dead range (abstention, like the dynamic fail-open) and the analysis is INCONCLUSIVE. Before lot 1 the unvisited callees were classified dead, so a long call chain downgraded the payload as `unreachable_function`. |
 
 **Known limitation** : cross-file function reachability is not implemented (intra-file BFS only, file-level approximation handles cross-file). Documented backlog item RC-M1: a non-exported helper called only via dynamic dispatch from another file is marked dead → severity LOW (FP). Combined with ESM `ImportDeclaration` gaps (DF-C3 backlog), the fail-direction is biased toward LOW, so cap saturation degrades coverage rather than introducing FPs.
 

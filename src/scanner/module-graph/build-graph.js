@@ -23,13 +23,14 @@ const path = require('path');
 const { findFiles, EXCLUDED_DIRS, debugLog } = require('../../utils');
 const { MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_TAINT_DEPTH } = require('./constants.js');
 const { parseFile, isLocalImport, resolveLocal, toRel } = require('./parse-utils.js');
+const { markIncomplete } = require('../../shared/completeness.js');
 
 /**
  * Build a dependency graph of local modules within a package.
  * Only tracks local imports (./  ../) — node_modules are ignored.
  *
  * @param {string} packagePath
- * @param {Object} [meta] - Optional out-param: mutated with { fileCount, truncated, maxNodes }
+ * @param {Object} [meta] - Optional out-param: mutated with { fileCount, truncated, maxNodes, edgeTruncated }
  *                          so the caller can emit a `large_package_graph_truncated` threat
  *                          when the package exceeds MAX_GRAPH_NODES (audit DF-C1).
  */
@@ -51,6 +52,7 @@ function buildModuleGraph(packagePath, meta = {}) {
   if (files.length > MAX_GRAPH_NODES) {
     debugLog(`[MODULE-GRAPH] Skipping: ${files.length} files exceeds MAX_GRAPH_NODES (${MAX_GRAPH_NODES})`);
     meta.truncated = true;
+    markIncomplete('moduleGraph', 'node-limit', { limit: MAX_GRAPH_NODES, observed: files.length });
     return graph;
   }
 
@@ -62,6 +64,11 @@ function buildModuleGraph(packagePath, meta = {}) {
     if (totalEdges > MAX_GRAPH_EDGES) {
       debugLog(`[MODULE-GRAPH] Edge limit reached (${totalEdges} > ${MAX_GRAPH_EDGES}), returning partial graph`);
       graph[relFile] = imports;
+      // Files after this one are dropped from the graph: an attacker can pad
+      // imports ahead of the real source/sink to blind cross-file analysis.
+      // The verdict is therefore INCONCLUSIVE, never silently complete.
+      meta.edgeTruncated = true;
+      markIncomplete('moduleGraph', 'edge-limit', { limit: MAX_GRAPH_EDGES, observed: totalEdges });
       break;
     }
     graph[relFile] = imports;

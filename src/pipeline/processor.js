@@ -37,6 +37,7 @@ const { getPyPIPackageMetadata } = require('../scanner/pypi-registry.js');
 const { runPyPIMaintainerChecks } = require('../scanner/pypi-maintainer.js');
 const { checkPyPIReleaseZero } = require('../scanner/pypi-release-zero.js');
 const { detectScannedPackageName } = require('../scanner/python.js');
+const { getIncomplete, describe: describeIncomplete } = require('../shared/completeness.js');
 
 // Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
 // it so the pipeline still works when the file is absent (some dev machines
@@ -590,6 +591,16 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   }
   const perceivedFlagged = tierCounts.verified + tierCounts.high;
 
+  // Incompleteness contract (architecture lot 1): a bound or timeout hit during
+  // the scan makes the analysis INCONCLUSIVE. Score and riskLevel are unchanged
+  // (orthogonal); the outputs must never present such a scan as SAFE.
+  const incomplete = getIncomplete();
+  const analysisStatus = incomplete.length > 0 ? 'INCONCLUSIVE' : 'COMPLETE';
+  if (incomplete.length > 0) {
+    warnings.push('Analysis INCONCLUSIVE - an internal bound was reached, findings may be missing: ' +
+      incomplete.map(describeIncomplete).join('; '));
+  }
+
   const result = {
     target: targetPath,
     timestamp: new Date().toISOString(),
@@ -603,6 +614,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       low: lowCount,
       riskScore,
       riskLevel,
+      analysisStatus,
       globalRiskScore,
       maxFileScore,
       packageScore,
@@ -615,6 +627,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       perceivedFlagged
     },
     sandbox: sandboxData,
+    analysis: { status: analysisStatus, incomplete },
     warnings: warnings.length > 0 ? warnings : undefined,
     scannerErrors: scannerErrors.length > 0 ? scannerErrors : undefined
   };
