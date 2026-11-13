@@ -103,6 +103,21 @@ function runCheckOverridesTests() {
     assert(satisfies('11.0.5', '>=11') === null, 'unsupported range shape returns null');
   });
 
+  test('OVERRIDES: --security-only never blocks on housekeeping, still blocks redirection', () => {
+    const stale = lockWith({ eslintRange: '^11.0.2', configRange: '^11.0.1' });
+    const full = checkOverrides({ overrides: { minimatch: '11.0.5' } }, stale, REG);
+    assert(full.some(x => /no longer needed/.test(x)), 'full mode must flag the stale override');
+    const sec = checkOverrides({ overrides: { minimatch: '11.0.5' } }, stale, REG, { securityOnly: true });
+    assert(sec.length === 0, 'security-only must not block a release on a stale override: ' + JSON.stringify(sec));
+    assert(checkOverrides({}, lockWith(), REG, { securityOnly: true }).length === 0, 'stale REGISTRY entry is housekeeping too');
+    const evil = checkOverrides({ overrides: { minimatch: 'npm:evil@1.0.0' } }, stale, REG, { securityOnly: true });
+    assert(evil.some(x => /must be a plain semver/.test(x)), 'security-only must still refuse a redirection');
+    const undoc = checkOverrides({ overrides: { minimatch: '11.0.5', x: '1.0.0' } }, stale, REG, { securityOnly: true });
+    assert(undoc.some(x => /x" is not documented/.test(x)), 'security-only must still refuse an undocumented override');
+    const unlocked = checkOverrides({ overrides: { minimatch: '11.0.5' } }, lockWith({ mm: '10.2.6' }), REG, { securityOnly: true });
+    assert(unlocked.some(x => /locked at 10.2.6/.test(x)), 'security-only must still check the lockfile');
+  });
+
   test('OVERRIDES: the repository package.json + lockfile pass the guard', () => {
     const root = path.join(__dirname, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));

@@ -23,7 +23,11 @@
  *     admits one, the guard fails and asks for the override to be removed: while an
  *     override exists, Dependabot does not reliably propose updates for that package.
  *
- * Usage: node scripts/check-overrides.js   (reads package.json + package-lock.json)
+ * Usage: node scripts/check-overrides.js [--security-only]   (reads package.json + package-lock.json)
+ *
+ * --security-only (publish job): rules 1-3 only. Rule 4 and the stale-REGISTRY check
+ * are housekeeping; they run in the PR `test` job and must never block a release,
+ * including a security release, on the day a parent starts admitting the fix.
  */
 
 const fs = require('fs');
@@ -112,7 +116,7 @@ function parentRange(lock, parent, name) {
 /**
  * @returns {string[]} violations (empty = pass)
  */
-function checkOverrides(pkg, lock, registry = REGISTRY) {
+function checkOverrides(pkg, lock, registry = REGISTRY, { securityOnly = false } = {}) {
   const problems = [];
   const overrides = (pkg && pkg.overrides) || {};
   for (const [name, value] of Object.entries(overrides)) {
@@ -134,6 +138,7 @@ function checkOverrides(pkg, lock, registry = REGISTRY) {
     for (const l of locked) {
       if (satisfies(l.version, value) !== true) problems.push(`override "${name}": ${l.key} is locked at ${l.version}, which does not satisfy ${value} (regenerate the lockfile)`);
     }
+    if (securityOnly) continue;
     const stillNeeded = [];
     for (const parent of doc.parents) {
       const range = parentRange(lock, parent, name);
@@ -146,7 +151,7 @@ function checkOverrides(pkg, lock, registry = REGISTRY) {
       problems.push(`override "${name}" is no longer needed: every documented parent now admits a version >= ${doc.firstPatched}. Remove it from package.json and from REGISTRY, then regenerate the lockfile (while it exists, Dependabot does not reliably propose updates for ${name})`);
     }
   }
-  for (const name of Object.keys(registry)) {
+  for (const name of securityOnly ? [] : Object.keys(registry)) {
     if (!Object.prototype.hasOwnProperty.call(overrides, name)) problems.push(`REGISTRY documents "${name}" but package.json has no such override: remove the stale entry`);
   }
   return problems;
@@ -162,14 +167,15 @@ function main() {
     console.error(`::error::check-overrides: cannot read package.json / package-lock.json: ${e.message}`);
     process.exit(1);
   }
-  const problems = checkOverrides(pkg, lock);
+  const securityOnly = process.argv.includes('--security-only');
+  const problems = checkOverrides(pkg, lock, REGISTRY, { securityOnly });
   if (problems.length > 0) {
     console.error('::error::npm overrides guard failed');
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
   const n = Object.keys(pkg.overrides || {}).length;
-  console.log(`package.json overrides: clean (${n} documented, plain spec, locked, still needed)`);
+  console.log(`package.json overrides: clean (${n} documented, plain spec, locked${securityOnly ? "; housekeeping checks skipped (--security-only)" : ", still needed"})`);
 }
 
 if (require.main === module) main();
