@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-11-14
+
 ### Security
 
 - **One hand-written `package.json` value silenced the package scanner (`src/scanner/package.js`).** A non-string lifecycle value (`"preinstall": 1`, `true`, an object or an array) or a non-string `version` (object, array, boolean, number) made `scanPackageJson` throw (`scriptContent.substring` / `versionStr.split is not a function`). The pipeline isolates a crashed scanner, so every finding of that scanner disappeared: a `postinstall: curl ... | sh` next to the junk value scored 0 instead of 75 and the CLI printed SAFE. npm drops non-string scripts at install time, so the malicious hook still runs; a tarball `package.json` that differs from the registry metadata is a known technique (manifest confusion). Non-string scripts are now skipped (npm never runs them) without stopping the analysis of the others; a numeric version is read as text, so the repdigit dependency-confusion signal (`version: 999`) is kept; a `package.json` that is not an object yields no finding instead of a crash; the `binding.gyp` branch picks the first string install hook. Found by the seeded fuzz of architecture lot 3. `tests/scanner/package-type-guards.test.js` (18 tests, positives and negatives): 11 fail on the previous code. A seeded probe of 300 random type-confused top-level fields through the full pipeline finds 10 crash signatures on the previous code, all in `scanPackageJson`, and 0 after the fix (nested values such as `exports` sub-objects are not covered by the probe).

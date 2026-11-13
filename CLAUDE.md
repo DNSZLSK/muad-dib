@@ -120,11 +120,11 @@ Run `npm run ci:local` before every push. It replays the exact PR gate from `.gi
 
 **Version bump rule:** a version change must land in the SAME commit as ALL files rewritten by `npm run docs:stats` — `stats.json` plus every marker-bearing doc (`CLAUDE.md`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `docs/INDEX.md`, `docs/README.fr.md`, `docs/threat-model.md`). Committing a subset makes `docs:stats:check` fail in CI even when it passes locally, because the local working tree is coherent but the pushed tree is not. After any bump: `npm run docs:stats`, then `git add` everything it touched (`git diff --name-only` to list), then commit.
 
-## Current Metrics (v<!--stat:version-->2.12.0<!--/stat:version-->; detection metrics last fully measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.12.1<!--/stat:version-->; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **<!--stat:version-->2.12.0<!--/stat:version-->** |
+| Version | **<!--stat:version-->2.12.1<!--/stat:version-->** |
 | Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->167<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
 | Rules | **<!--stat:rulesTotal-->274<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
