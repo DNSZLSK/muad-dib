@@ -113,6 +113,7 @@ const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test
 const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
 const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runIncompletenessTests } = require('./unit/incompleteness.test');
+const { runCheckOverridesTests } = require('./unit/check-overrides.test');
 const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
 const { runE2EScoringGuardTests } = require('./integration/e2e-scoring-guards.test');
 const { runE2EFpCapTests } = require('./integration/e2e-fp-caps.test');
@@ -393,6 +394,7 @@ async function timed(name, fn) {
   await timed('fp-cap-vetoes', runFpCapVetoTests);
   await timed('scoring-guards', runScoringGuardTests);
   await timed('incompleteness', runIncompletenessTests);
+  await timed('check-overrides', runCheckOverridesTests);
   await timed('dilution-thresholds', runDilutionThresholdTests);
   await timed('e2e-scoring-guards', runE2EScoringGuardTests);
   await timed('e2e-fp-caps', runE2EFpCapTests);

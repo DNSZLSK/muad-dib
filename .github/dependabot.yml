@@ -1,10 +1,19 @@
 version: 2
 updates:
+  # Cooldown: a freshly published version is the window in which a hijacked
+  # maintainer account ships malware (Shai-Hulud, chalk/debug 2025), and most such
+  # versions are pulled within days. Waiting 7 days before proposing a version
+  # update lets the registry and the feeds catch it first. Security updates are
+  # not delayed by the cooldown.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7

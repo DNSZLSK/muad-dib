@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4545 tests across 166 files)
+npm test          # Run all tests (custom framework, 4545 tests across 167 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -112,10 +112,11 @@ Never skip documentation updates when publishing a new version.
 
 Run `npm run ci:local` before every push. It replays the exact PR gate from `.github/workflows/scan.yml` in order:
 1. `node scripts/check-deps-typosquats.js` (loadash guard)
-2. `node scripts/check-no-tracked-node-modules.js`
-3. `npm audit --audit-level=high` (needs network; advisories can appear between pushes without any code change)
-4. `npm run docs:stats:check` (stats.json + doc markers vs source)
-5. `npm test`
+2. `node scripts/check-overrides.js` (npm `overrides`: documented in its REGISTRY, plain registry version only - no alias/URL/git/file -, locked, and still needed; fails with "remove it" once the parents admit a patched version)
+3. `node scripts/check-no-tracked-node-modules.js`
+4. `npm audit --audit-level=high` (needs network; advisories can appear between pushes without any code change)
+5. `npm run docs:stats:check` (stats.json + doc markers vs source)
+6. `npm test`
 
 **Version bump rule:** a version change must land in the SAME commit as ALL files rewritten by `npm run docs:stats` — `stats.json` plus every marker-bearing doc (`CLAUDE.md`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `docs/INDEX.md`, `docs/README.fr.md`, `docs/threat-model.md`). Committing a subset makes `docs:stats:check` fail in CI even when it passes locally, because the local working tree is coherent but the pushed tree is not. After any bump: `npm run docs:stats`, then `git add` everything it touched (`git diff --name-only` to list), then commit.
 
@@ -124,7 +125,7 @@ Run `npm run ci:local` before every push. It replays the exact PR gate from `.gi
 | Metric | Value |
 |--------|-------|
 | Version | **<!--stat:version-->2.12.0<!--/stat:version-->** |
-| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->166<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
+| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->167<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
 | Rules | **<!--stat:rulesTotal-->274<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **99 samples** in `tests/ground-truth/attacks.json` (npm + PyPI; 96 at the v2.11.48 measurement below). |

@@ -14,7 +14,7 @@
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js",
-    "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm test",
+    "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-overrides.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm test",
     "docs:stats": "node scripts/collect-stats.js && node scripts/sync-stats.js",
     "docs:stats:tests": "node scripts/collect-stats.js --with-tests && node scripts/sync-stats.js",
     "docs:stats:check": "node scripts/collect-stats.js --check && node scripts/sync-stats.js --check",
@@ -56,13 +56,16 @@
     "acorn": "8.18.0",
     "acorn-walk": "8.3.5",
     "adm-zip": "0.6.1",
-    "js-yaml": "5.3.0",
+    "js-yaml": "5.5.0",
     "web-tree-sitter": "^0.27.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "eslint": "10.10.0",
+    "eslint": "10.14.0",
     "eslint-plugin-security": "^4.0.0",
     "globals": "17.12.0"
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
   }
 }
