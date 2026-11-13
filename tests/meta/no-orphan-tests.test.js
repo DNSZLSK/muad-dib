@@ -32,11 +32,6 @@ const ALLOWLIST = new Map([
   ['audit-2026-05/dataflow-findings.test.js', 'standalone audit reproducer, to port'],
   ['audit-2026-05/reachability-findings.test.js', 'standalone audit reproducer, RC-C2/RC-H1..H3 still open'],
   ['audit-2026-05/scoring-critical-findings.test.js', 'standalone audit reproducer, SC-C2.b/SC-C3 still open'],
-  // Specify v2.11.7 sandbox analyzer signals and the 2026 network allowlist, which were never
-  // implemented (no emitter in src/ or docker/ in any branch). Pending decision: implement
-  // the features or remove tests, rules and CHANGELOG claims.
-  ['unit/sandbox-analyzer-2026.test.js', 'specifies unimplemented v2.11.7 analyzer signals'],
-  ['integration/sandbox-2026-pipeline.test.js', 'specifies unimplemented v2.11.7 analyzer signals + allowlist'],
 ]);
 
 const toPosix = p => p.split(path.sep).join('/');

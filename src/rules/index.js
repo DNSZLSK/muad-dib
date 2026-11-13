@@ -402,6 +402,21 @@ const RULES = {
     mitre: 'T1105'
   },
 
+  // PYSRC-011 — executable line of a shipped .pth file (LiteLLM 1.107.0, mars 2026).
+  pth_exec_payload: {
+    id: 'MUADDIB-PYSRC-011',
+    name: 'Python .pth Start-up Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un fichier .pth livre dans le paquet contient une ligne executable (commencant par "import ") qui decode (base64/zlib/marshal...), lance un processus, ouvre le reseau ou execute du code dynamique. site.py execute ces lignes a chaque demarrage de Python, dans tous les processus. Pattern LiteLLM 1.107.0 (litellm_init.pth, stealer base64). Les .pth legitimes (coverage, distutils-precedence, namespace nspkg) n\x27utilisent que des litteraux et des imports simples et ne declenchent pas.',
+    references: [
+      'https://docs.python.org/3/library/site.html',
+      'https://attack.mitre.org/techniques/T1546/'
+    ],
+    mitre: 'T1546'
+  },
+
   // PYAST-001 a 008 — Python AST scanner via tree-sitter (TrapDoor PyPI parity,
   // v2.11.42+). Mirror du `ast.js` cote npm : full CST walk avec scope tracking,
   // detecteurs scope-aware. Coexiste avec PYSRC-001..008 (regex) en defense
@@ -411,11 +426,11 @@ const RULES = {
   // fetch->exec, base64->exec, ctypes shellcode, env->network).
   pyast_setup_cmdclass_override: {
     id: 'MUADDIB-PYAST-001',
-    name: 'setup.py cmdclass Override',
+    name: 'setup.py / pyproject.toml cmdclass Override',
     severity: 'CRITICAL',
     confidence: 'high',
     domain: 'malware',
-    description: 'setup.py contient setup(cmdclass={...}) qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
+    description: 'setup.py contient setup(cmdclass={...}), ou pyproject.toml declare [tool.setuptools.cmdclass] (meme effet, setuptools >= 61), qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
     references: [
       'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
       'https://securitylabs.datadoghq.com/articles/guarddog-identify-malicious-pypi-packages/',
@@ -1969,87 +1984,6 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1071/001/'
     ],
     mitre: 'T1041'
-  },
-
-  // Honey-trap and 2026 supply chain runtime signals
-  sandbox_honey_read: {
-    id: 'MUADDIB-SANDBOX-017',
-    name: 'Sandbox: Honeypot Decoy File Read',
-    severity: 'CRITICAL',
-    confidence: 'high',
-    domain: 'malware',
-    description: 'Le package lit un fichier decoy de credentials plante par la sandbox (.npmrc-decoy, .ssh/id_rsa-decoy, wallet decoy, etc.). Aucun outil legitime ne lit ces chemins. Capture les zero-days qui scannent aveuglement les chemins de credentials connus.',
-    references: [
-      'https://attack.mitre.org/techniques/T1552/001/',
-      'https://blog.phylum.io/shai-hulud-npm-worm'
-    ],
-    mitre: 'T1552.001'
-  },
-  sandbox_credential_target_read: {
-    id: 'MUADDIB-SANDBOX-018',
-    name: 'Sandbox: Credential Target File Read',
-    severity: 'HIGH',
-    confidence: 'high',
-    domain: 'malware',
-    description: 'Le package lit un fichier de credentials cible des malwares 2026 (cloud creds, wallets, browser data, GPG, kubernetes config). Pattern PhantomRaven, Shai-Hulud.',
-    references: [
-      'https://attack.mitre.org/techniques/T1552/001/',
-      'https://attack.mitre.org/techniques/T1555/'
-    ],
-    mitre: 'T1555'
-  },
-  sandbox_persistence_write: {
-    id: 'MUADDIB-SANDBOX-019',
-    name: 'Sandbox: Persistence File Write',
-    severity: 'CRITICAL',
-    confidence: 'high',
-    domain: 'malware',
-    description: 'Le package ecrit dans un emplacement de persistance (.bashrc, .zshrc, autostart, cron, systemd user, LaunchAgents, registry Run keys). Aucun cas legitime en npm install.',
-    references: [
-      'https://attack.mitre.org/techniques/T1547/',
-      'https://attack.mitre.org/techniques/T1546/004/'
-    ],
-    mitre: 'T1547'
-  },
-  sandbox_execve_chain_depth: {
-    id: 'MUADDIB-SANDBOX-020',
-    name: 'Sandbox: Suspicious Execve Chain Depth',
-    severity: 'HIGH',
-    confidence: 'medium',
-    domain: 'malware',
-    description: 'Chaine de processus depuis npm install au-dela de la profondeur attendue (npm install -> script -> binaire externe). Pattern Shai-Hulud preinstall worm avec curl/wget/bash final.',
-    references: [
-      'https://unit42.paloaltonetworks.com/npm-supply-chain-attack/',
-      'https://attack.mitre.org/techniques/T1059/'
-    ],
-    mitre: 'T1059'
-  },
-  sandbox_npm_self_invoke: {
-    id: 'MUADDIB-SANDBOX-021',
-    name: 'Sandbox: npm CLI Self-Invocation',
-    severity: 'CRITICAL',
-    confidence: 'high',
-    domain: 'malware',
-    description: 'Le package invoque npm publish/deprecate/owner/token/access (ou yarn publish) depuis l\'arborescence npm install. Pattern CanisterWorm self-propagation. Aucun cas legitime.',
-    references: [
-      'https://www.stepsecurity.io/blog/canisterworm-how-a-self-propagating-npm-worm-is-spreading-backdoors-across-the-ecosystem/',
-      'https://attack.mitre.org/techniques/T1195.002/'
-    ],
-    mitre: 'T1195.002'
-  },
-  sandbox_runtime_deobfuscation_executed: {
-    id: 'MUADDIB-SANDBOX-022',
-    name: 'Sandbox: Runtime Deobfuscation Executed',
-    severity: 'HIGH',
-    confidence: 'high',
-    domain: 'malware',
-    description: 'new Function() ou eval() execute avec un body de plus de 500 octets, derive d\'une string source obfusquee (high entropy ou taille >1KB). Pattern Axios 2026 OrDeR_7077: XOR + base64 decoded at runtime then executed.',
-    references: [
-      'https://snyk.io/blog/axios-npm-package-compromised-supply-chain-attack-delivers-cross-platform/',
-      'https://attack.mitre.org/techniques/T1027/',
-      'https://attack.mitre.org/techniques/T1059.007/'
-    ],
-    mitre: 'T1027'
   },
 
   // Entropy detections

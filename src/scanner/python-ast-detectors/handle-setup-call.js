@@ -158,4 +158,4 @@ function inspectEntryPoints(valueNode) {
   return sus;
 }
 
-module.exports = { handleSetupCall };
+module.exports = { handleSetupCall, INSTALL_TIME_COMMANDS };

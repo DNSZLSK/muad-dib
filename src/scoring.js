@@ -219,21 +219,9 @@ const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
 // PyPI packages emit no `lifecycle_script` (an npm-only signal), so confirmed
 // import-time RCE would otherwise be capped at 35 and buried in the benign 25-35
 // cluster. These types are emitted ONLY by the Python scanners (python-source.js /
-// python-ast-detectors) on .py files, so their presence is itself the PyPI signal —
+// python-ast-detectors) on .py files and pyproject.toml, so their presence is itself the PyPI signal -
 // no ecosystem flag needed, and npm packages are unaffected (they never emit them).
-const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
-  'import_time_exec',
-  'import_time_subprocess',
-  'import_time_os_system',
-  'import_time_deserialization',
-  'import_time_fetch_exec',
-  'fetch_to_fork_exec_inline',
-  'pyast_module_level_exec',
-  'pyast_module_level_subprocess_shell',
-  'pyast_module_level_unsafe_deserialization',
-  'pyast_setup_cmdclass_override',
-  'pyast_ctypes_shellcode_load'
-]);
+const { PYPI_IMPORT_TIME_RCE_TYPES } = require('./shared/constants.js');
 
 // Track R: the reputation multiplier (applyReputationFactor) may suppress noise on
 // mature/popular packages down to ×0.10, but it must never pull a CONFIRMED malice
@@ -2351,27 +2339,21 @@ const _CRITICAL_PRELOAD_TYPES = new Set([
   'sandbox_network_after_sensitive_read',
   'sandbox_known_exfil_domain',
   'sandbox_timer_delay_critical',
-  'canary_exfiltration',
-  'sandbox_honey_read',
-  'sandbox_persistence_write',
-  'sandbox_npm_self_invoke',
-  'sandbox_runtime_deobfuscation_executed'
+  'canary_exfiltration'
 ]);
 
 const _HIGH_COMPOUND_TYPES = new Set([
   'sandbox_preload_sensitive_read',
   'sandbox_exec_suspicious',
-  'sandbox_network_outlier',
-  'sandbox_execve_chain_depth',
-  'sandbox_credential_target_read'
+  'sandbox_network_outlier'
 ]);
 
 /**
  * Classify a sandbox run into a verdict and apply the score contract.
  *
  * Verdicts:
- *   - MALICIOUS_CONFIRMED: >=1 critical preload signal OR honey read correlated
- *     with non-registry outbound. Floor score at 75.
+ *   - MALICIOUS_CONFIRMED: >=1 critical preload signal (sensitive read then network,
+ *     known exfil domain, critical timer delay, canary exfiltration). Floor score at 75.
  *   - MALICIOUS_CHAIN: >=2 high-severity compound signals in the same run.
  *     Floor score at 60.
  *   - CLEAN_HIGH_CONFIDENCE: install completed, no fingerprint detected, no
@@ -2406,7 +2388,7 @@ function applySandboxVerdict(result, sandboxResult) {
   const criticalSignals = findingTypes.filter(t => _CRITICAL_PRELOAD_TYPES.has(t));
   const highSignals = findingTypes.filter(t => _HIGH_COMPOUND_TYPES.has(t));
 
-  // MALICIOUS_CONFIRMED: any single critical preload/honey signal is enough.
+  // MALICIOUS_CONFIRMED: any single critical preload signal is enough.
   if (criticalSignals.length >= 1) {
     const newScore = Math.max(oldScore, SANDBOX_VERDICT_CONFIRMED_FLOOR);
     result.summary.riskScore = newScore;

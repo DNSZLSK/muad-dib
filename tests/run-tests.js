@@ -64,6 +64,8 @@ const { runEntropyTests } = require('./scanner/entropy.test');
 const { runPythonTests } = require('./scanner/python.test');
 const { runPythonSourceTests } = require('./scanner/python-source.test');
 const { runPythonAstTests } = require('./scanner/python-ast.test');
+const { runPyprojectCmdclassTests } = require('./scanner/pyproject-cmdclass.test');
+const { runPthPayloadTests } = require('./scanner/pth-payload.test');
 const { runPyPIRegistryTests } = require('./scanner/pypi-registry.test');
 const { runPyPIMaintainerTests } = require('./scanner/pypi-maintainer.test');
 const { runPyPIReleaseZeroTests } = require('./scanner/pypi-release-zero.test');
@@ -108,6 +110,12 @@ const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
 const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroboration.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
+const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
+const { runScoringGuardTests } = require('./unit/scoring-guards.test');
+const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
+const { runE2EScoringGuardTests } = require('./integration/e2e-scoring-guards.test');
+const { runE2EFpCapTests } = require('./integration/e2e-fp-caps.test');
+const { runExecutedFilesTests } = require('./integration/executed-files.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runFpClustersTests } = require('./unit/fp-clusters.test');
 const { runRegressionCheckTests } = require('./unit/regression-check.test');
@@ -160,6 +168,7 @@ const { runGroundTruthSmokeTests } = require('./integration/ground-truth-smoke.t
 const { runV266FixesTests } = require('./integration/v266-fixes.test');
 const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test');
 const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
+const { runF10VendorCliE2ETests } = require('./integration/f10-vendor-cli-e2e.test');
 const { runSingleFireCriticalFloorTests } = require('./integration/single-fire-critical-floor.test');
 const { runDecayAggregationTests } = require('./integration/decay-aggregation.test');
 const { runCompoundReplacementTests } = require('./integration/compound-replacement.test');
@@ -252,6 +261,8 @@ async function timed(name, fn) {
   await timed('python', runPythonTests);
   await timed('python-source', runPythonSourceTests);
   await timed('python-ast', runPythonAstTests);
+  await timed('pyproject-cmdclass', runPyprojectCmdclassTests);
+  await timed('pth-payload', runPthPayloadTests);
   await timed('pypi-registry', runPyPIRegistryTests);
   await timed('pypi-maintainer', runPyPIMaintainerTests);
   await timed('pypi-release-zero', runPyPIReleaseZeroTests);
@@ -342,6 +353,7 @@ async function timed(name, fn) {
 
   // Compound scoring tests (v2.9.2)
   await timed('compound-scoring', runCompoundScoringTests);
+  await timed('f10-vendor-cli-e2e', runF10VendorCliE2ETests);
 
   // Hybrid v3 Phase 1: single-fire critical floor
   await timed('single-fire-critical-floor', runSingleFireCriticalFloorTests);
@@ -377,6 +389,12 @@ async function timed(name, fn) {
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
+  await timed('fp-cap-vetoes', runFpCapVetoTests);
+  await timed('scoring-guards', runScoringGuardTests);
+  await timed('dilution-thresholds', runDilutionThresholdTests);
+  await timed('e2e-scoring-guards', runE2EScoringGuardTests);
+  await timed('e2e-fp-caps', runE2EFpCapTests);
+  await timed('executed-files', runExecutedFilesTests);
 
   // FP cluster aggregation (FPR Improvement Plan - Chantier 1)
   await timed('fp-clusters', runFpClustersTests);

@@ -720,7 +720,8 @@
         "rules": [],
         "severities": [
           "MEDIUM",
-          "HIGH"
+          "HIGH",
+          "CRITICAL"
         ],
         "scanners": [
           "ast",
