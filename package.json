@@ -14,7 +14,7 @@
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js",
-    "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm test",
+    "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-overrides.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm test",
     "docs:stats": "node scripts/collect-stats.js && node scripts/sync-stats.js",
     "docs:stats:tests": "node scripts/collect-stats.js --with-tests && node scripts/sync-stats.js",
     "docs:stats:check": "node scripts/collect-stats.js --check && node scripts/sync-stats.js --check",

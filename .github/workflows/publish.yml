@@ -36,6 +36,9 @@ jobs:
           # typosquat detector (findTyposquatMatch) against ~100 popular packages.
           # Catches loadash/chlk/expresss/requestt/etc, not just hardcoded names.
           node scripts/check-deps-typosquats.js
+          # Guard 3: npm overrides - documented, plain registry versions only (no alias /
+          # URL / git / file redirection), locked, and still needed.
+          node scripts/check-overrides.js
       - run: npm ci
       - name: Verify dep provenance attestations (SLSA gate)
         run: npm audit signatures
