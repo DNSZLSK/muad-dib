@@ -64,5 +64,8 @@
     "eslint": "10.14.0",
     "eslint-plugin-security": "^4.0.0",
     "globals": "17.12.0"
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
   }
 }
