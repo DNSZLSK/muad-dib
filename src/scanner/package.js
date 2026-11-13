@@ -84,11 +84,16 @@ async function scanPackageJson(targetPath) {
     console.log('[WARN] Failed to parse package.json: ' + e.message);
     return threats;
   }
-  const scripts = pkg.scripts || {};
+  // Type guards (seeded fuzz, 2026-11-13): one hand-written non-string value used to throw here,
+  // and the crash dropped every finding of this scanner, including a `postinstall: curl | sh`
+  // next to it (score 75 -> 0). npm tooling never writes such values and npm drops non-string
+  // scripts at install time, so they are skipped, never allowed to stop the scan of the others.
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) pkg = {};
+  const scripts = (pkg.scripts && typeof pkg.scripts === 'object') ? pkg.scripts : {};
 
   // Scan lifecycle scripts
   for (const scriptName of SUSPICIOUS_SCRIPTS) {
-    if (scripts[scriptName]) {
+    if (typeof scripts[scriptName] === 'string' && scripts[scriptName]) {
       const scriptContent = scripts[scriptName];
 
       threats.push({
@@ -193,10 +198,12 @@ async function scanPackageJson(targetPath) {
   // stayed HIGH (<20). Restricting to repdigit majors keeps 27/27 corpus dep-conf MALWARE at
   // ZERO benign hits, and unblocks the lifecycle_version99 compound below (which would
   // otherwise inherit the calendar FPs once escalated to CRITICAL).
-  const versionStr = pkg.version || '';
+  // A numeric version (invalid for npm, so hand-written) keeps the repdigit signal; other types are ignored.
+  const versionStr = typeof pkg.version === 'string' ? pkg.version
+    : typeof pkg.version === 'number' ? String(pkg.version) : '';
   const majorVersion = parseInt(versionStr.split('.')[0], 10);
   if ([99, 999, 9999].includes(majorVersion)) {
-    const hasInstallHook = ['preinstall', 'install', 'postinstall'].some(s => scripts[s]);
+    const hasInstallHook = ['preinstall', 'install', 'postinstall'].some(s => typeof scripts[s] === 'string' && scripts[s]);
     if (hasInstallHook) {
       threats.push({
         type: 'version_99_preinstall',
@@ -265,8 +272,9 @@ async function scanPackageJson(targetPath) {
   // that aren't standard node-gyp build tools, this indicates potentially malicious native code.
   const bindingGypPath = path.join(targetPath, 'binding.gyp');
   if (fs.existsSync(bindingGypPath)) {
-    const hasInstallLifecycle = ['preinstall', 'install', 'postinstall'].some(s => scripts[s]);
-    const installScript = scripts.install || scripts.postinstall || scripts.preinstall || '';
+    const installHooks = ['install', 'postinstall', 'preinstall'].map(s => scripts[s]).filter(v => typeof v === 'string' && v);
+    const hasInstallLifecycle = installHooks.length > 0;
+    const installScript = installHooks[0] || '';
     // node-gyp rebuild / prebuild-install / cmake-js are legitimate native addon builders
     const isStandardBuild = /\b(node-gyp|prebuild|cmake-js|napi|prebuildify|neon)\b/i.test(installScript);
 
