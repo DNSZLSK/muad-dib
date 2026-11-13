@@ -286,7 +286,14 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       // Runs on whatever was produced, even after a timeout: an unfiltered candidate
       // must never be published. The MAX_FLOWS quota applies AFTER the filter so
       // filtered decoys cannot consume it.
-      direct = filterFirstPartyNetworkFlows(direct, targetPath).slice(0, MAX_FLOWS);
+      direct = filterFirstPartyNetworkFlows(direct, targetPath);
+      // More flows than the quota survive the filter: the surplus is not published, so
+      // the analysis cannot claim to be complete. Measured 2026-11-13 on the 3 242-package
+      // corpus sample: the maximum is 5 flows after the filter, so this marks no package there.
+      if (direct.length > MAX_FLOWS) {
+        markIncomplete('moduleGraph', 'flow-limit', { limit: MAX_FLOWS, observed: direct.length });
+        direct = direct.slice(0, MAX_FLOWS);
+      }
       indirect = filterFirstPartyNetworkFlows(indirect, targetPath);
       return direct.concat(indirect);
     };
