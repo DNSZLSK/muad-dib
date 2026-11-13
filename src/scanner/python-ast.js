@@ -110,7 +110,6 @@ async function initPythonParser() {
     } catch (e) {
       initError = e;
       if (process.env.MUADDIB_DEBUG) {
-        // eslint-disable-next-line no-console
         console.error('[python-ast] init failed — Python AST scanner disabled:', e.message);
       }
       return null;
@@ -158,7 +157,6 @@ function scanPythonAST(targetPath) {
       tree = parserInstance.parse(source);
     } catch (e) {
       if (process.env.MUADDIB_DEBUG) {
-        // eslint-disable-next-line no-console
         console.error(`[python-ast] parse failed on ${file}:`, e.message);
       }
       continue;

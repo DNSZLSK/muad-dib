@@ -8,6 +8,8 @@ export default defineConfig([
     files: ["**/*.{js,mjs,cjs}"],
     plugins: { js, security },
     extends: ["js/recommended"],
+    // A stale `eslint-disable` silently hides the next real finding on that line.
+    linterOptions: { reportUnusedDisableDirectives: "error" },
     languageOptions: {
       globals: globals.node
     },

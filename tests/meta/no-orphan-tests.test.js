@@ -9,7 +9,8 @@
  * protected nothing because they never ran. A test that does not run is worse than no
  * test: it reads as coverage.
  *
- * Rule: every tests/**\/*.test.js must be reachable, through relative require() chains,
+ * Rule: every tests/**\/*.test.js, and every other tests/**\/*.js that registers tests
+ * (calls test('...') / asyncTest('...'), e.g. fuzz-test.js), must be reachable, through relative require() chains,
  * from tests/run-tests.js (npm test) or tests/run-tests-integration.js (npm run
  * test:integration). Exceptions live in ALLOWLIST, each with its reason; an entry that
  * becomes reachable or disappears must be removed (stale entries fail too).
@@ -32,7 +33,16 @@ const ALLOWLIST = new Map([
   ['audit-2026-05/dataflow-findings.test.js', 'standalone audit reproducer, to port'],
   ['audit-2026-05/reachability-findings.test.js', 'standalone audit reproducer, asserts known open issues'],
   ['audit-2026-05/scoring-critical-findings.test.js', 'standalone audit reproducer, asserts known open issues'],
+  // Test files not named *.test.js (found when the guard was extended, 2026-11-13).
+  ['fuzz-test.js', 'unseeded fuzz runner, wired with a fixed seed in architecture lot 3'],
+  ['test-typosquat-multifactor.js', 'standalone since 2026-02-10, 7/8 pass; "cache prevents duplicate API calls" fails (2 calls, 1 expected): investigate the metadata cache, then port'],
 ]);
+
+// Files that define or run the harness: never test modules themselves.
+const HARNESS_FILES = new Set(['test-utils.js', 'run-tests.js', 'run-tests-integration.js']);
+// A *.js that registers named tests through the harness API, whatever its file name
+// (fuzz-test.js was invisible to a *.test.js-only guard).
+const REGISTERS_TESTS_RE = /\b(?:asyncTest|test)\s*\(\s*['"`]/;
 
 const toPosix = p => p.split(path.sep).join('/');
 
@@ -43,6 +53,11 @@ function listTestFiles(testsDir) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) { if (!DATA_DIRS.has(e.name) && e.name !== 'node_modules') walk(p); }
       else if (e.name.endsWith('.test.js')) out.push(toPosix(path.relative(testsDir, p)));
+      else if (e.name.endsWith('.js') && !HARNESS_FILES.has(e.name) && dir !== path.join(testsDir, 'meta')) {
+        let src = '';
+        try { src = fs.readFileSync(p, 'utf8'); } catch { /* unreadable: not a test module */ }
+        if (REGISTERS_TESTS_RE.test(src)) out.push(toPosix(path.relative(testsDir, p)));
+      }
     }
   })(testsDir);
   return out.sort();
@@ -102,7 +117,7 @@ function findUncalledTestImports(testsDir, runners = RUNNERS) {
 function runNoOrphanTestsTests() {
   console.log('\n=== META: NO ORPHAN TEST FILES ===\n');
 
-  test('META-ORPHAN: every *.test.js is reachable from a runner (or allowlisted with a reason)', () => {
+  test('META-ORPHAN: every test file (*.test.js, or a *.js that registers tests) is reachable from a runner (or allowlisted with a reason)', () => {
     const orphans = findOrphanTestFiles(TESTS_DIR).filter(f => !ALLOWLIST.has(f));
     assert(orphans.length === 0,
       `test files never run by npm test / test:integration (register them in tests/run-tests.js): ${orphans.join(', ')}`);
@@ -125,9 +140,12 @@ function runNoOrphanTestsTests() {
       fs.writeFileSync(path.join(root, 'unit', 'via-helper.test.js'), '');
       fs.writeFileSync(path.join(root, 'unit', 'forgotten.test.js'), '');
       fs.writeFileSync(path.join(root, 'samples', 'fixture.test.js'), ''); // data dir, ignored
+      fs.writeFileSync(path.join(root, 'fuzz-run.js'), "test('fuzz case', () => {});\n"); // registers tests, not *.test.js
+      fs.writeFileSync(path.join(root, 'bench.js'), "console.log('timing only');\n"); // no test registration
+      fs.writeFileSync(path.join(root, 'test-utils.js'), "function test(name, fn) {}\ntest('x', () => {});\n"); // harness
       const orphans = findOrphanTestFiles(root, ['run-tests.js']);
-      assert(orphans.length === 1 && orphans[0] === 'unit/forgotten.test.js',
-        `expected only unit/forgotten.test.js, got ${JSON.stringify(orphans)}`);
+      assert(JSON.stringify(orphans) === JSON.stringify(['fuzz-run.js', 'unit/forgotten.test.js']),
+        `expected fuzz-run.js and unit/forgotten.test.js, got ${JSON.stringify(orphans)}`);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

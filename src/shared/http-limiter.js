@@ -364,7 +364,6 @@ function acquireRegistrySlot(host = DEFAULT_HOST) {
     // forever — the outer scan timeout is the real bound), and a denial loops
     // into a fresh request instead of proceeding WITHOUT a token (that would
     // silently bypass the brain during the very pauses it exists for).
-    // eslint-disable-next-line no-await-in-loop
     while (!(await _acquireRateTokenProxy(host, 0))) { /* re-request */ }
   };
   if (b.sem.active < REGISTRY_SEMAPHORE_MAX) {

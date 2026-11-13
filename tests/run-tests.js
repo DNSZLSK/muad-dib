@@ -202,6 +202,7 @@ const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 // Meta tests (test-suite quality guards)
 const { runNoSourceGrepTests } = require('./meta/no-source-grep.test');
 const { runNoOrphanTestsTests } = require('./meta/no-orphan-tests.test');
+const { runRuleTestCoverageTests } = require('./meta/rule-test-coverage.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -503,6 +504,7 @@ async function timed(name, fn) {
   // Meta tests (test-suite quality guards — runs last, fast, no fixtures)
   await timed('meta-no-source-grep', runNoSourceGrepTests);
   await timed('meta-no-orphan-tests', runNoOrphanTestsTests);
+  await timed('meta-rule-test-coverage', runRuleTestCoverageTests);
 
   // Drain any still-pending asyncTest promises before the tally — a floating
   // asyncTest (missing await) must never have its result killed by process.exit.

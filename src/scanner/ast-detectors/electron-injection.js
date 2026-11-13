@@ -224,7 +224,7 @@ function resolveElectronTarget(node, ctx) {
   if (node && node.type === 'Identifier' && ctx && ctx.electronTargetVars && ctx.electronTargetVars.has(node.name)) {
     return ctx.electronTargetVars.get(node.name);
   }
-  let pathStr = '';
+  let pathStr;
   let home = false;
   if (node && node.type === 'CallExpression' && node.callee && node.callee.type === 'MemberExpression' &&
       node.callee.object && node.callee.object.type === 'Identifier' && node.callee.object.name === 'path' &&
