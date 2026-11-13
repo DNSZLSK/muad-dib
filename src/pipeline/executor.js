@@ -405,8 +405,14 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const scannerErrors = [];
   const scanResult = settledResults.map((r, i) => {
     if (r.status === 'fulfilled') return r.value;
-    scannerErrors.push({ scanner: SCANNER_NAMES[i], error: r.reason });
-    console.error(`[WARN] Scanner ${SCANNER_NAMES[i]} failed: ${r.reason?.message || r.reason}`);
+    const message = String((r.reason && r.reason.message) || r.reason);
+    // `error` stays the raw reason (an Error serializes to {} in JSON); `message` is readable.
+    scannerErrors.push({ scanner: SCANNER_NAMES[i], error: r.reason, message });
+    console.error(`[WARN] Scanner ${SCANNER_NAMES[i]} failed: ${message}`);
+    // Incompleteness contract: a crashed scanner contributed nothing, so the scan cannot be
+    // COMPLETE. A one-line package.json value that crashed scanPackageJson hid a
+    // `postinstall: curl | sh` (score 75 -> 0, reported SAFE) before this mark.
+    markIncomplete(SCANNER_NAMES[i], 'error');
     return [];
   });
 

