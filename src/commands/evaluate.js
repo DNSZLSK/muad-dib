@@ -1509,7 +1509,7 @@ async function evaluateCorpusDir(corpusDir, options = {}) {
     const bucket = _corpusTimeBucket(meta.firstSeen);
 
     const scratch = path.join(workRoot, `s${i}-${sanitizeCorpusName(meta.name)}`);
-    let extractedDir = null;
+    let extractedDir;
     try {
       fs.mkdirSync(scratch, { recursive: true });
       extractedDir = extractArchive(archivePath, scratch);
@@ -1547,7 +1547,7 @@ async function evaluateCorpusDir(corpusDir, options = {}) {
   // Remove the per-invocation work root (per-sample scratch was already cleaned).
   try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
 
-  const summary = _summarizeCorpus(details, threshold);
+  const summary = _summarizeCorpus(details);
   const report = {
     version: require('../../package.json').version,
     date: new Date().toISOString(),
@@ -1582,7 +1582,7 @@ function sanitizeCorpusName(name) {
 
 // Roll up score distribution, flagged rate, and (when labels exist) TPR/FPR —
 // overall and per time bucket.
-function _summarizeCorpus(details, threshold) {
+function _summarizeCorpus(details) {
   const scored = details.filter(d => !d.skipped);
   const dist = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
   for (const d of scored) {

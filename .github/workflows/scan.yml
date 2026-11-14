@@ -36,12 +36,13 @@ jobs:
         run: npm audit --audit-level=high
       - name: Guard - doc counts in sync with source (stats markers)
         run: npm run docs:stats:check
+      - name: Lint (0 errors, warning count may only go down)
+        run: npm run lint
       - name: Run tests
         run: npm test
 
   coverage:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,9 +52,9 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
-      - run: npm install -g c8@11.0.0
-      - name: Run tests with coverage
-        run: c8 --reporter=lcov --reporter=text npm test
+      - name: Run tests with coverage (floors in .c8rc.json)
+        # c8 comes from the lockfile (devDependency), not an unpinned global install.
+        run: npm run test:coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
