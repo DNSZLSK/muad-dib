@@ -32,18 +32,7 @@ function need(key) {
 }
 
 // Files that carry current-state counts. Files without markers/raw-sites are simply skipped.
-const DOC_FILES = [
-  'README.md',
-  'docs/README.fr.md',
-  'ARCHITECTURE.md',
-  'SECURITY.md',
-  'docs/INDEX.md',
-  'docs/threat-model.md',
-  'docs/EVALUATION_METHODOLOGY.md',
-  'docs/index.html',
-  'vscode-extension/README.md',
-  'CLAUDE.md',
-];
+const DOC_FILES = require('./stats-doc-files.js');
 
 // Numbers trapped inside fenced ASCII diagrams. Each regex must match exactly one line in its file.
 const RAW_SITES = [
