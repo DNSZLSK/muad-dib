@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node tests/run-tests.js",
     "test:integration": "node tests/run-tests-integration.js",
+    "test:fuzz": "node tests/fuzz-test.js",
     "test:regression-check": "node scripts/regression-check.js",
     "fp-clusters": "node scripts/analyze-fp-clusters.js",
     "scan": "node bin/muaddib.js scan .",

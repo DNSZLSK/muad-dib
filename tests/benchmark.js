@@ -678,6 +678,23 @@ async function main() {
     iterations = parseInt(args[iterIdx + 1], 10) || 1;
   }
 
+  // --budget <file.json>: { "<size>": { "e2eMs": N, "rssMb": N }, ... }. Runs only the listed
+  // sizes and exits 1 when a measured value exceeds its ceiling, so a performance or memory
+  // regression fails CI instead of being printed and forgotten.
+  let budgets = null;
+  const budgetIdx = args.indexOf('--budget');
+  if (budgetIdx !== -1) {
+    const file = args[budgetIdx + 1];
+    if (!file || !fs.existsSync(file)) {
+      console.error(`--budget needs an existing JSON file, got: ${file}`);
+      process.exit(2);
+    }
+    budgets = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const s of Object.keys(budgets)) {
+      if (!SIZES[s]) { console.error(`Unknown size in budget file: ${s}`); process.exit(2); }
+    }
+  }
+
   console.log(`\nMUAD'DIB Performance Benchmark`);
   console.log(`Node ${process.version} | ${os.platform()} ${os.arch()} | ${os.cpus()[0].model}`);
   console.log(`${os.cpus().length} cores | ${Math.round(os.totalmem() / 1024 / 1024 / 1024)} GB RAM`);
@@ -689,7 +706,20 @@ async function main() {
 
   const allResults = { iocWarmupMs: Math.round(iocWarmupMs) };
 
-  if (compareMode) {
+  if (budgets) {
+    allResults.sizes = [];
+    const over = [];
+    for (const s of Object.keys(budgets)) {
+      const r = await benchmarkSize(s, iterations);
+      allResults.sizes.push(r);
+      const b = budgets[s];
+      if (b.e2eMs && r.e2eMs > b.e2eMs) over.push(`${s}: e2e ${r.e2eMs.toFixed(0)} ms > budget ${b.e2eMs} ms`);
+      if (b.rssMb && r.memAfter.rss > b.rssMb) over.push(`${s}: RSS ${r.memAfter.rss} MB > budget ${b.rssMb} MB`);
+    }
+    console.log(`\n  BUDGET: ${over.length ? 'EXCEEDED' : 'within limits'}`);
+    for (const o of over) console.log(`    - ${o}`);
+    if (over.length) process.exitCode = 1;
+  } else if (compareMode) {
     allResults.comparisons = await benchmarkComparisons();
   } else if (scalingMode) {
     allResults.scaling = await benchmarkScaling();
