@@ -637,7 +637,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.12.2 Scanner
+MUAD'DIB 2.12.3 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)

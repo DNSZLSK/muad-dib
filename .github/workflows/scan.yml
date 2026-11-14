@@ -85,8 +85,7 @@ jobs:
   # The product AS A USER INSTALLS IT: npm pack of this checkout, installed in a temp dir, then a
   # known-malicious dependency scanned with an empty HOME. The npm package ships no IOC data;
   # for months the first-run download was a 404 and such a scan scored 0, unnoticed (2026-11-14).
-  # not-safe = detected, or INCONCLUSIVE; never a COMPLETE low score. Switch to --expect detect
-  # once the ioc-db release is live.
+  # The packed checkout must DETECT it, through the signed ioc-db release.
   product-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -107,7 +106,7 @@ jobs:
           npm init -y >/dev/null
           npm install "${RUNNER_TEMP}"/pack/*.tgz --ignore-scripts --no-audit --no-fund
       - name: Scan a known-malicious dependency with an empty HOME
-        run: node scripts/product-smoke.js "${RUNNER_TEMP}/inst/node_modules/muaddib-scanner/bin/muaddib.js" --expect not-safe
+        run: node scripts/product-smoke.js "${RUNNER_TEMP}/inst/node_modules/muaddib-scanner/bin/muaddib.js" --expect detect
 
   # Calibration phase: non-blocking until the budgets in tests/benchmark-budgets.json are set
   # from the measurements of this runner (artifact benchmark-results), then blocking.
