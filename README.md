@@ -129,7 +129,10 @@ muaddib scan . --sarif results.sarif     # SARIF (GitHub Security)
 ```bash
 muaddib scan . --fail-on critical  # Fail only on CRITICAL
 muaddib scan . --fail-on high      # Fail on HIGH and CRITICAL (default)
+muaddib scan . --fail-on-inconclusive  # Also fail when the analysis is INCONCLUSIVE (fail closed)
 ```
+
+A scan is `INCONCLUSIVE` when an internal bound was reached (timeout, graph size, file cap): some code was not fully analyzed and findings may be missing. The JSON carries `analysis.status`, SARIF carries error-level tool notifications. By default the exit code ignores it; use `--fail-on-inconclusive` in CI to treat a partial analysis as a failure.
 
 ### Paranoid mode
 
@@ -374,7 +377,7 @@ npm test
 
 ### Testing
 
-- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->167<!--/stat:testFiles--> modular test files
+- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->169<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)

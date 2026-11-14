@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+const { describe: describeIncomplete } = require('../shared/completeness.js');
 const fs = require('fs');
 const { escapeHtml } = require('../utils.js');
 const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
@@ -39,6 +40,14 @@ function domainBadge(threat) {
 }
 
 function generateHTML(results) {
+  // Incompleteness contract (architecture lot 1): an INCONCLUSIVE analysis is
+  // never presented as a clean result.
+  const analysis = results && results.analysis;
+  const inconclusive = !!(analysis && analysis.status === 'INCONCLUSIVE');
+  const inconclusiveBanner = inconclusive
+    ? '<div class="inconclusive"><strong>Analysis INCONCLUSIVE</strong> - an internal bound was reached, findings may be missing.<ul>' +
+      (analysis.incomplete || []).map(e => '<li>' + escapeHtml(describeIncomplete(e)) + '</li>').join('') + '</ul></div>'
+    : '';
   const { target, timestamp, threats, summary } = results;
 
   // P0a — Risk by Domain breakdown
@@ -129,6 +138,15 @@ function generateHTML(results) {
       font-size: 12px;
       margin-top: 40px;
     }
+    .inconclusive {
+      background: rgba(249, 199, 79, 0.15);
+      border-left: 4px solid #f9c74f;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      color: #f9c74f;
+    }
+    .inconclusive ul { margin: 8px 0 0 18px; color: #ddd; }
     .ok {
       background: #16213e;
       padding: 40px;
@@ -167,6 +185,8 @@ function generateHTML(results) {
 <body>
   <div class="container">
     <h1>MUAD'DIB - Scan Report</h1>
+
+    ${inconclusiveBanner}
 
     <div class="summary">
       <div class="summary-card total">
@@ -215,7 +235,9 @@ function generateHTML(results) {
         ${threatRows}
       </tbody>
     </table>
-    ` : '<div class="ok">No threats detected</div>'}
+    ` : (inconclusive
+      ? '<div class="ok inconclusive-empty">No threats detected in the analyzed part - analysis INCONCLUSIVE, not SAFE</div>'
+      : '<div class="ok">No threats detected</div>')}
 
     ${results.sandbox ? `
     <div class="sandbox-section">
