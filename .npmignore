@@ -88,4 +88,5 @@ audit-data/
 self-scan-*.json
 .githooks/
 zizmor.yml
+.c8rc.json
 /stats.json

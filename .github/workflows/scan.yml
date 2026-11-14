@@ -97,6 +97,8 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Package contents (runtime files only)
+        run: node scripts/check-package-contents.js
       - name: Pack and install like a user
         run: |
           set -euo pipefail
