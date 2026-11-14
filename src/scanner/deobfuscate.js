@@ -211,9 +211,8 @@ function deobfuscate(sourceCode) {
   // Apply replacements from end to start to preserve positions
   filtered.sort((a, b) => b.start - a.start);
 
-  let code = sourceCode;
+  let code = applyReplacements(sourceCode, filtered);
   for (const r of filtered) {
-    code = code.slice(0, r.start) + r.value + code.slice(r.end);
     transforms.push({
       type: r.type,
       start: r.start,
@@ -344,9 +343,8 @@ function propagateConsts(sourceCode) {
 
   // Apply replacements from end to start
   validReplacements.sort((a, b) => b.start - a.start);
-  let code = sourceCode;
+  let code = applyReplacements(sourceCode, validReplacements);
   for (const r of validReplacements) {
-    code = code.slice(0, r.start) + r.value + code.slice(r.end);
     transforms.push({
       type: r.type,
       start: r.start,
@@ -398,9 +396,8 @@ function foldConcatsOnly(sourceCode) {
   }
 
   filtered.sort((a, b) => b.start - a.start);
-  let code = sourceCode;
+  const code = applyReplacements(sourceCode, filtered);
   for (const r of filtered) {
-    code = code.slice(0, r.start) + r.value + code.slice(r.end);
     transforms.push({ type: r.type, start: r.start, end: r.end, before: r.before, after: r.value });
   }
 
@@ -410,6 +407,45 @@ function foldConcatsOnly(sourceCode) {
 // ============================================================
 // HELPERS
 // ============================================================
+
+/**
+ * Apply { start, end, value } replacements (sorted by start, descending) to the source.
+ *
+ * Linear in the source size. Splicing each replacement into the whole string
+ * (code.slice(0, start) + value + code.slice(end)) copies the file once per
+ * replacement: a 4.9 MB minified bundle with 60 000 backtick string literals
+ * (`u`, each one a template_literal fold) took about 150 s per call, and the AST
+ * and dataflow scanners both call deobfuscate, so a package could hold one scan
+ * for minutes. Overlapping ranges (not produced by the callers today) keep the
+ * sequential splice, whose result depends on the application order.
+ *
+ * @param {string} source
+ * @param {Array<{start: number, end: number, value: string}>} descSorted
+ * @returns {string}
+ */
+function applyReplacements(source, descSorted) {
+  let bound = source.length;
+  for (const r of descSorted) {
+    if (r.end > bound) return applySequentially(source, descSorted);
+    bound = r.start;
+  }
+  const parts = [];
+  let pos = source.length;
+  for (const r of descSorted) {
+    parts.push(source.slice(r.end, pos), r.value);
+    pos = r.start;
+  }
+  parts.push(source.slice(0, pos));
+  return parts.reverse().join('');
+}
+
+function applySequentially(source, descSorted) {
+  let code = source;
+  for (const r of descSorted) {
+    code = code.slice(0, r.start) + r.value + code.slice(r.end);
+  }
+  return code;
+}
 
 /**
  * Recursively fold string concat BinaryExpression.
@@ -780,4 +816,4 @@ function detectControlFlowFlattening(sourceCode) {
   return found;
 }
 
-module.exports = { deobfuscate, detectControlFlowFlattening };
+module.exports = { deobfuscate, detectControlFlowFlattening, applyReplacements, applySequentially };

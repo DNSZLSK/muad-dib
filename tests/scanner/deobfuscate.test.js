@@ -1,5 +1,5 @@
 const { test, assert, assertIncludes } = require('../test-utils');
-const { deobfuscate } = require('../../src/scanner/deobfuscate.js');
+const { deobfuscate, applyReplacements, applySequentially } = require('../../src/scanner/deobfuscate.js');
 const acorn = require('acorn');
 
 async function runDeobfuscateTests() {
@@ -352,6 +352,68 @@ async function runDeobfuscateTests() {
     const { code } = deobfuscate(src);
     // 42 and true are not strings, should not be propagated
     assertIncludes(code, 'console.log(a)', 'Non-string elements should not be propagated');
+  });
+
+  // =====================================================
+  // Replacement application is linear in the source size
+  // =====================================================
+
+  // mulberry32: seeded, so a failure replays.
+  function prng(seed) {
+    return () => {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  test('DEOBFUSCATE: applyReplacements equals the sequential splice on non-overlapping ranges (200 seeded cases)', () => {
+    const rnd = prng(20261114);
+    for (let c = 0; c < 200; c++) {
+      const len = 1 + Math.floor(rnd() * 300);
+      let source = '';
+      for (let i = 0; i < len; i++) source += String.fromCharCode(32 + Math.floor(rnd() * 90));
+      const reps = [];
+      let pos = 0;
+      while (pos < len) {
+        const start = pos + Math.floor(rnd() * 10);
+        const end = Math.min(len, start + Math.floor(rnd() * 8));
+        if (start > len) break;
+        reps.push({ start, end, value: 'R' + c + '_' + reps.length + (rnd() < 0.3 ? '' : "'x'") });
+        pos = end + (end === start ? 1 : 0);
+      }
+      reps.sort((a, b) => b.start - a.start);
+      const linear = applyReplacements(source, reps);
+      const sequential = applySequentially(source, reps);
+      assert(linear === sequential, `case ${c} (seed 20261114): linear result differs from the sequential splice`);
+    }
+  });
+
+  test('DEOBFUSCATE: applyReplacements keeps the sequential result when ranges overlap', () => {
+    const source = 'abcdefghij';
+    const reps = [{ start: 4, end: 8, value: 'XY' }, { start: 2, end: 6, value: 'Z' }];
+    assert(applyReplacements(source, reps) === applySequentially(source, reps),
+      'overlapping ranges must fall back to the sequential splice');
+    assert(applyReplacements(source, reps) === 'abZij', `got ${applyReplacements(source, reps)}`);
+  });
+
+  test('DEOBFUSCATE: 60 000 backtick literals in a 3 MB bundle are folded in linear time, payload still revealed', () => {
+    // Shape of a minified bundle (seen in a 4.9 MB Scalar API reference bundle): every `u`
+    // is a template_literal fold. The per-replacement splice copied the whole file for each
+    // of them (about 150 s per call on 60 000 literals in 4.9 MB).
+    const parts = ['/*' + 'x'.repeat(2500000) + '*/', 'var a=['];
+    for (let i = 0; i < 60000; i++) parts.push('`u' + (i % 10) + '`,');
+    parts.push('];', "var m=require('child_' + 'process');");
+    const src = parts.join('');
+    const t0 = Date.now();
+    const { code, transforms } = deobfuscate(src);
+    const ms = Date.now() - t0;
+    assert(ms < 10000, `deobfuscate took ${ms} ms on a ${src.length}-char bundle (budget 10 s)`);
+    assert(transforms.filter(t => t.type === 'template_literal').length === 60000,
+      `expected 60000 template_literal transforms, got ${transforms.filter(t => t.type === 'template_literal').length}`);
+    assertIncludes(code, "require('child_process')", 'the concat payload after the literals must still be folded');
+    assertIncludes(code, "'u7',", 'backtick literals must be rewritten as quoted strings');
   });
 }
 
