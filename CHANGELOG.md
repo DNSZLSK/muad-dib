@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The npm package ships only runtime files (`.npmignore`, `.github/workflows/publish.yml`).** Up to 2.12.0 the tarball also carried `audit-data/all-review-results.json` (2.2 MB of review verdicts, already public in the repository), the release job's own `self-scan-vX.json`, `.githooks/`, `zizmor.yml` and `stats.json`: `.npmignore` replaces `.gitignore` entirely and listed none of them, and the self-scan step wrote into the package root right before `npm publish`. They are now excluded, the self-scan goes to `$RUNNER_TEMP`, and a release step fails unless every file of `npm pack --dry-run` is under `bin/`, `src/` or is `LICENSE`, `NOTICE`, `README.md`, `package.json` (checked on a clean `git archive` tree: 182 files, all allowed; the same check flags the 5 strays on the previous tree).
+
 - **Release workflow publishes through npm trusted publishing (`.github/workflows/publish.yml`).** The 2.12.1 publish ran with an expired `NPM_TOKEN`: the job logged `+ muaddib-scanner@2.12.1` and succeeded, yet the registry never served the version (404). The workflow no longer uses a token: it publishes through the OIDC exchange (`id-token: write`, already granted for provenance), keeps `setup-node`'s `registry-url` as in the npm trusted-publishing example (a first attempt without it ended in `ENEEDAUTH`), runs `npm publish` with `--loglevel verbose` so a failed OIDC exchange is visible in the job log, fails if npm is older than 11.5.1, and ends with a step that fails unless the registry serves the new version within 15 minutes. Requires the repository and `publish.yml` to be declared as trusted publisher in the npm package settings.
 
 ## [2.12.1] - 2026-11-14
