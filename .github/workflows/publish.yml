@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          # As in the npm trusted-publishing example (docs.npmjs.com/trusted-publishers). Removing
+          # it (2.12.1 first OIDC attempt) ended in ENEEDAUTH: the OIDC exchange did not happen.
           registry-url: https://registry.npmjs.org
           # Release job: no dependency cache (cache poisoning, zizmor). setup-node >= v5
           # caches automatically when package.json declares npm as packageManager.
@@ -60,7 +62,42 @@ jobs:
       - name: Self-scan node_modules (forensic record, non-blocking)
         env:
           REF_NAME: ${{ github.ref_name }}
-        run: node bin/muaddib.js scan node_modules --json > "self-scan-${REF_NAME}.json" || true
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Written outside the package root: up to 2.12.0 this file was published inside the tarball.
+        run: node bin/muaddib.js scan node_modules --json > "${RUNNER_TEMP}/self-scan-${REF_NAME}.json" || true
+      - name: Verify package contents (allowlist)
+        # The published tarball may only hold runtime files. 2.12.0 also shipped audit-data/
+        # (2.2 MB of review verdicts), the job's own self-scan, .githooks/, zizmor.yml, stats.json.
+        run: |
+          npm pack --dry-run --json --ignore-scripts > "${RUNNER_TEMP}/pack.json"
+          node -e '
+            const files = require(process.argv[1])[0].files.map(f => f.path);
+            const ok = /^(bin\/|src\/|LICENSE$|NOTICE$|README\.md$|package\.json$)/;
+            const bad = files.filter(p => !ok.test(p));
+            if (bad.length) { console.error("::error::unexpected files in the npm tarball: " + bad.join(", ")); process.exit(1); }
+            console.log(files.length + " files, all within the allowlist");
+          ' "${RUNNER_TEMP}/pack.json"
+      - name: Verify npm supports trusted publishing (>= 11.5.1)
+        run: |
+          V=$(npm --version)
+          echo "npm $V"
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); if (a*1e6+b*1e3+c < 11005001) { console.error("::error::npm " + process.argv[1] + " < 11.5.1: OIDC trusted publishing unsupported"); process.exit(1); }' "$V"
+      # Trusted publishing (OIDC, id-token: write above): no NPM_TOKEN. The npm package settings
+      # must list this repository and this workflow file as trusted publisher.
+      # npm logs a failed OIDC exchange only at verbose level, then continues unauthenticated
+      # (ENEEDAUTH): verbose keeps the real reason in the job log.
+      - run: npm publish --provenance --access public --loglevel verbose
+      - name: Verify the version is live on the registry
+        # npm can accept an upload and still not publish it (2026-11-14: "+ muaddib-scanner@2.12.1"
+        # then 404 for 10+ minutes with an expired token). A release is done only when the
+        # registry serves it.
+        timeout-minutes: 15
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          for i in $(seq 1 60); do
+            if [ "$(npm view "muaddib-scanner@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "muaddib-scanner@$VERSION is live"; exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::muaddib-scanner@$VERSION is not served by the registry 15 min after publish"
+          exit 1

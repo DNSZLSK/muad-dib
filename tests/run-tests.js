@@ -49,6 +49,7 @@ const { runObfuscationTests } = require('./scanner/obfuscation.test');
 const { runBundleDetectTests } = require('./scanner/bundle-detect.test');
 const { runDataflowTests } = require('./scanner/dataflow.test');
 const { runPackageTests } = require('./scanner/package.test');
+const { runPackageTypeGuardTests } = require('./scanner/package-type-guards.test');
 const { runPhantomGypTests } = require('./scanner/phantom-gyp.test');
 const { runNativeDropExecTests } = require('./scanner/native-drop-exec.test');
 const { runBinarySourceTests } = require('./scanner/binary-source.test');
@@ -241,6 +242,7 @@ async function timed(name, fn) {
   await timed('bundle-detect', runBundleDetectTests);
   await timed('dataflow', runDataflowTests);
   await timed('package', runPackageTests);
+  await timed('package-type-guards', runPackageTypeGuardTests);
   await timed('phantom-gyp', runPhantomGypTests);
   await timed('native-drop-exec', runNativeDropExecTests);
   await timed('binary-source', runBinarySourceTests);
