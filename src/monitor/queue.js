@@ -36,7 +36,7 @@ const { sendWebhook } = require('../webhook.js');
 // mutable seam so tests can intercept them, same as ingestion._deps — otherwise
 // the destructured ref is captured at load and a test stub never fires.
 const _deps = { sendWebhook };
-const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
+const { downloadToFile, extractArchiveDetailed, extractionFindings, sanitizePackageName } = require('../shared/download.js');
 const { extractInPool } = require('../shared/extract-pool.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken: awaitRateTokenForWorker, signal429: signal429ForWorker } = require('../shared/http-limiter.js');
@@ -226,11 +226,13 @@ const INLINE_EXTRACT_MAX_BYTES = (parseInt(process.env.MUADDIB_INLINE_EXTRACT_MB
 
 // Always returns a Promise so call sites uniformly `await`. Pool for anything above
 // the (default 0) inline window; the tiny inline path stays available for operators.
+// Resolves to the extraction report ({ dir, partial, ... }): a partial tar extraction is
+// scanned, not dropped (partial-extraction evasion, 2026-11-14).
 function extractGated(archivePath, destDir, compressedSize) {
   if (compressedSize > INLINE_EXTRACT_MAX_BYTES) {
-    return extractInPool(archivePath, destDir);
+    return extractInPool(archivePath, destDir, { detailed: true });
   }
-  return Promise.resolve(extractArchive(archivePath, destDir));
+  return Promise.resolve(extractArchiveDetailed(archivePath, destDir));
 }
 
 // First-publish sandbox: max pending sandbox items before deferring first-publish clean scans
@@ -844,6 +846,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // Quick scan: extract + check package.json + shell scripts for lifecycle threats.
     const unpackedSize = meta.unpackedSize || 0;
     let extractedDir = null;
+    let extractReport = null;
 
     if (unpackedSize > LARGE_PACKAGE_SIZE || meta.fastTrack) {
       // Exception 1: IOC match — always full scan
@@ -862,13 +865,15 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         let bypassQuickScan = false;
         try {
           const _crumb = beginOp('extract:quickscan', { name, version, unpackedSizeMb: Math.round(unpackedSize / 1024 / 1024) });
-          try { extractedDir = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
+          try { extractReport = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
+          extractedDir = extractReport.dir;
 
           const [pkgThreats, shellThreats] = await Promise.all([
             scanPackageJson(extractedDir),
             scanShellScripts(extractedDir)
           ]);
-          const quickThreats = [...pkgThreats, ...shellThreats];
+          // A hostile archive member (HIGH) forces the full scan below.
+          const quickThreats = [...pkgThreats, ...shellThreats, ...extractionFindings(extractReport)];
 
           bypassQuickScan = quickThreats.some(t =>
             t.severity === 'CRITICAL' || t.severity === 'HIGH'
@@ -888,6 +893,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         } catch {
           // Extract/quick scan failed — fallback to registry metadata check
           extractedDir = null;
+          extractReport = null;
           const scripts = meta.registryScripts || {};
           const DANGEROUS_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
           const hasSuspiciousLifecycle = DANGEROUS_LIFECYCLE.some(hook => {
@@ -912,7 +918,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
 
     if (!extractedDir) {
       const _crumb = beginOp('extract:prework', { name, version, unpackedSizeMb: Math.round((meta.unpackedSize || 0) / 1024 / 1024) });
-      try { extractedDir = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
+      try { extractReport = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
+      extractedDir = extractReport.dir;
+    }
+    if (extractReport && extractReport.partial) {
+      const hostile = (extractReport.hostileMembers || []).length;
+      console.log(`[MONITOR] EXTRACT_PARTIAL: ${name}@${version} - tar refused part of the archive, scanning the extracted members (${hostile} hostile member(s))`);
     }
 
     // ML Phase 2a: Count JS files and detect test presence for enriched features
@@ -1019,6 +1030,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       // is set even when null ("main already tried, don't refetch"). pypi leaves it
       // absent so the worker takes the unchanged CLI/else-if path.
       if (ecosystem === 'npm') scanContext.npmRegistryMeta = npmRegistryMeta;
+      const archiveThreats = extractionFindings(extractReport);
+      if (archiveThreats.length > 0) scanContext.extractionFindings = archiveThreats;
       result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext, signal);
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {

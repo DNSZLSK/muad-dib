@@ -35,14 +35,14 @@
  */
 
 const { parentPort } = require('worker_threads');
-const { extractArchive } = require('./download.js');
+const { extractArchiveDetailed } = require('./download.js');
 
 parentPort.on('message', (job) => {
   if (!job || typeof job.id === 'undefined') return;
   try {
     const opts = job.format ? { format: job.format } : {};
-    const dir = extractArchive(job.archivePath, job.destDir, opts);
-    parentPort.postMessage({ id: job.id, ok: true, dir });
+    const report = extractArchiveDetailed(job.archivePath, job.destDir, opts);
+    parentPort.postMessage({ id: job.id, ok: true, dir: report.dir, report });
   } catch (err) {
     parentPort.postMessage({ id: job.id, ok: false, error: err && err.message ? err.message : String(err) });
   }

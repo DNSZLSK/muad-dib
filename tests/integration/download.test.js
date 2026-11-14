@@ -386,6 +386,104 @@ async function runDownloadTests() {
       } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    // --- partial-extraction evasion (2026-11-14): tar extracts every member it accepts and
+    // exits non-zero on the refused one. extractArchive used to throw, so the monitor never
+    // scanned a package that npm (node-tar skips the entry) installs. Now: keep, report, scan.
+    const { extractArchiveDetailed, extractionFindings } = require('../../src/shared/download.js');
+    const { auditTarBuffer } = require('../../src/shared/tar-audit.js');
+    const tarOf = (...members) => Buffer.concat([...members, Buffer.alloc(1024)]);
+    const PKG = Buffer.from('{"name":"evasion-fixture","version":"1.0.0"}');
+    const withTmp = (prefix, fn) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+      try { return fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    };
+
+    for (const [label, hostile, reason] of [
+      ['write-through-symlink', [tarMember('package/link', Buffer.alloc(0), '2', '../../outside'), tarMember('package/link/x.txt', Buffer.from('x'))], 'write-through-symlink'],
+      ['dot-dot member', [tarMember('package/../../escape.txt', Buffer.from('x'))], 'dot-dot-name']
+    ]) {
+      test(`DOWNLOAD: a ${label} no longer hides the package (partial extraction is kept and reported)`, () => withTmp('muaddib-tarpartial-', root => {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, tgzOf(tarMember('package/package.json', PKG), ...hostile, tarMember('package/index.js', Buffer.from('module.exports = 1;'))));
+        const report = extractArchiveDetailed(tgz, dest);
+        assert(report.partial === true, 'tar refused a member, the report must say partial: ' + JSON.stringify(report));
+        assert(report.dir === path.join(dest, 'package'), 'package root still detected, got ' + report.dir);
+        assert(fs.existsSync(path.join(report.dir, 'package.json')), 'members before the refused one are extracted');
+        assert(fs.existsSync(path.join(report.dir, 'index.js')), 'members after the refused one are extracted');
+        assert(report.hostileMembers.some(m => m.reason === reason), `expected a ${reason} member, got ` + JSON.stringify(report.hostileMembers));
+        const types = extractionFindings(report).map(t => t.type + ':' + t.severity);
+        assert(types.includes('archive_hostile_member:HIGH') && types.includes('archive_partial_extraction:LOW'), 'findings: ' + types.join(','));
+        assert(extractArchive(tgz, fs.mkdtempSync(path.join(root, 'again-'))).endsWith('package'), 'extractArchive returns the root instead of throwing');
+      }));
+    }
+
+    test('DOWNLOAD: a complete extraction reports partial=false and no archive findings', () => withTmp('muaddib-tarfull-', root => {
+      const dest = path.join(root, 'dest');
+      fs.mkdirSync(dest);
+      const tgz = path.join(root, 'ok.tgz');
+      fs.writeFileSync(tgz, tgzOf(tarMember('package/package.json', PKG), tarMember('package/index.js', Buffer.from('1'))));
+      const report = extractArchiveDetailed(tgz, dest);
+      assert(report.partial === false && !report.hostileMembers, 'clean archive: ' + JSON.stringify(report));
+      assert(extractionFindings(report).length === 0, 'no findings for a complete extraction');
+    }));
+
+    test('DOWNLOAD: an archive tar cannot read at all still throws (nothing to scan)', () => withTmp('muaddib-targarbage-', root => {
+      const dest = path.join(root, 'dest');
+      fs.mkdirSync(dest);
+      const tgz = path.join(root, 'garbage.tgz');
+      fs.writeFileSync(tgz, Buffer.from('this is not a gzip stream at all'));
+      let threw = false;
+      try { extractArchiveDetailed(tgz, dest); } catch { threw = true; }
+      assert(threw, 'an archive that yields no member must keep throwing (callers fall back to metadata)');
+    }));
+
+    // auditTarBuffer: the decision is made on raw headers, independent of the tar implementation.
+    test('TAR-AUDIT: flags dot-dot, absolute, write-through-symlink and escaping hardlink members', () => {
+      const r = auditTarBuffer(tarOf(
+        tarMember('package/ok.js', Buffer.from('1')),
+        tarMember('package/../x', Buffer.from('1')),
+        tarMember('/etc/abs', Buffer.from('1')),
+        tarMember('package/l', Buffer.alloc(0), '2', 'somewhere'),
+        tarMember('package/l/inner.js', Buffer.from('1')),
+        tarMember('package/h', Buffer.alloc(0), '1', '../../etc/passwd')));
+      const reasons = r.hostileMembers.map(m => m.reason).sort();
+      assert(JSON.stringify(reasons) === JSON.stringify(['absolute-name', 'dot-dot-name', 'hardlink-escape', 'write-through-symlink']), 'reasons: ' + JSON.stringify(r.hostileMembers));
+      assert(r.members === 6 && r.truncated === false, 'counts: ' + JSON.stringify(r));
+    });
+
+    test('TAR-AUDIT: does not flag a venv-style absolute symlink TARGET, a dir replacing a symlink, or ".." inside a file name', () => {
+      const r = auditTarBuffer(tarOf(
+        tarMember('pkg/venv/bin/python', Buffer.alloc(0), '2', '/usr/bin/python3'),
+        tarMember('pkg/rel', Buffer.alloc(0), '2', '../sibling'),
+        tarMember('pkg/swap', Buffer.alloc(0), '2', 'target'),
+        tarMember('pkg/swap', Buffer.alloc(0), '5'),
+        tarMember('pkg/swap/file.txt', Buffer.from('1')),
+        tarMember('pkg/a..b.js', Buffer.from('1')),
+        tarMember('./pkg/./c.js', Buffer.from('1')),
+        tarMember('pkg/hl', Buffer.alloc(0), '1', 'pkg/a..b.js')));
+      assert(r.hostileMembers.length === 0, 'benign archive flagged: ' + JSON.stringify(r.hostileMembers));
+    });
+
+    test('TAR-AUDIT: reads names from GNU longname (L) and PAX (x) headers', () => {
+      const longName = 'package/' + 'd/'.repeat(60) + '../../../../escape';
+      const pax = (k, v) => { let rec = ` ${k}=${v}\n`; let len = rec.length; len += String(len + String(len).length).length; rec = `${len}${rec}`; return Buffer.from(rec); };
+      const r = auditTarBuffer(tarOf(
+        tarMember('././@LongLink', Buffer.from(longName + '\0'), 'L'),
+        tarMember('package/placeholder', Buffer.from('1')),
+        tarMember('PaxHeader', pax('path', 'package/../pax-escape'), 'x'),
+        tarMember('package/innocent', Buffer.from('1'))));
+      const names = r.hostileMembers.map(m => m.name);
+      assert(names.includes(longName) && names.includes('package/../pax-escape'), 'names: ' + JSON.stringify(names));
+    });
+
+    test('TAR-AUDIT: a truncated stream stops without throwing and says truncated', () => {
+      const full = tarOf(tarMember('package/a.js', Buffer.alloc(2000, 0x61)));
+      const r = auditTarBuffer(full.subarray(0, 700));
+      assert(r.truncated === true, 'truncated data must be reported: ' + JSON.stringify(r));
+    });
+
     test('DOWNLOAD: a zip entry named ../escape.txt is refused before anything is written', () => {
       const AdmZip = require('adm-zip');
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-zipslip-'));

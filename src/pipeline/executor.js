@@ -441,6 +441,14 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     binarySourceThreats
   ] = scanResult;
 
+  // A partial archive extraction (tar refused members, see download.js) means part of the
+  // package was never on disk: the scan is INCONCLUSIVE under the lot 1 contract, not only
+  // a LOW finding.
+  if (Array.isArray(options.extractionFindings) &&
+      options.extractionFindings.some(t => t && t.type === 'archive_partial_extraction')) {
+    markIncomplete('extraction', 'partial-archive');
+  }
+
   // Emit warning if file count cap was hit + quick-scan overflow files
   const quickScanThreats = [];
   if (wasFilesCapped()) {
@@ -530,7 +538,11 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       message: `Cross-file dataflow: ${f.source} in ${f.sourceFile} → ${f.sink} in ${f.sinkFile}`,
       file: f.sinkFile
     })),
-    ...moduleGraphThreats
+    ...moduleGraphThreats,
+    // Archive-level findings from the caller's extraction (monitor/evaluate): a partial tar
+    // extraction and the members tar refused. Only these two types are accepted.
+    ...(Array.isArray(options.extractionFindings) ? options.extractionFindings : [])
+      .filter(t => t && (t.type === 'archive_hostile_member' || t.type === 'archive_partial_extraction'))
   ];
 
   // Paranoid mode

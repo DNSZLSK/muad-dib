@@ -920,6 +920,14 @@ const PLAYBOOKS = {
     'Verifier si des donnees sensibles sont envoyees via ce canal. ' +
     'Les proxies HTTP classiques ne filtrent pas ce trafic.',
 
+  archive_hostile_member:
+    'HAUTE: l\'archive contient un membre que tar refuse (../, nom absolu, ecriture a travers un lien symbolique, lien dur sortant). Aucun outil de packaging ne produit cela : c\'est une tentative de faire echouer l\'extraction des scanners pendant que npm installe le reste. ' +
+    'Lister l\'archive (tar tvzf) et lire les membres refuses. NE PAS installer. Examiner le reste du package comme suspect : le membre refuse sert a cacher le contenu, pas a le porter.',
+
+  archive_partial_extraction:
+    'BASSE: tar a refuse une partie de l\'archive, seuls les membres extraits ont ete scannes. Resultat non concluant. ' +
+    'Lister l\'archive (tar tvzf), identifier les membres refuses (cf. archive_hostile_member) et inspecter le package manuellement.',
+
   large_package_graph_truncated:
     'Package volumineux (> MAX_GRAPH_NODES fichiers). Cross-file dataflow non analyse. ' +
     'Auditer les sous-modules manuellement ou scanner par sous-paquet. ' +

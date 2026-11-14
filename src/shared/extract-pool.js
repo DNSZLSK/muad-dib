@@ -83,12 +83,12 @@ let pending = [];
 let jobSeq = 0;
 let destroyed = false;
 
-function _settle(job, err, dir) {
+function _settle(job, err, dir, report) {
   if (job.settled) return;
   job.settled = true;
   if (job.timer) { clearTimeout(job.timer); job.timer = null; }
   if (err) job.reject(err);
-  else job.resolve(dir);
+  else job.resolve(job.detailed ? (report || { dir, partial: false }) : dir);
 }
 
 function _removeWorker(entry) {
@@ -116,7 +116,7 @@ function _onMessage(entry, msg) {
   entry.busy = false;
   entry.job = null;
   if (job && msg && msg.id === job.id) {
-    if (msg.ok) _settle(job, null, msg.dir);
+    if (msg.ok) _settle(job, null, msg.dir, msg.report);
     else _settle(job, new Error(msg.error || 'extract-pool: worker reported failure'));
   }
   _dispatch();
@@ -178,7 +178,9 @@ function _dispatch() {
  * @param {string} destDir  - must already exist
  * @param {Object} [options]
  * @param {'targz'|'zip'} [options.format] - override auto-detection
- * @returns {Promise<string>} extracted package root
+ * @param {boolean} [options.detailed] - resolve to the extractArchiveDetailed report
+ *   ({ dir, partial, ... }) instead of the bare directory
+ * @returns {Promise<string|Object>} extracted package root (or report when detailed)
  */
 function extractInPool(archivePath, destDir, options = {}) {
   return new Promise((resolve, reject) => {
@@ -192,6 +194,7 @@ function extractInPool(archivePath, destDir, options = {}) {
       archivePath,
       destDir,
       format: (options && options.format) || null,
+      detailed: !!(options && options.detailed),
       resolve,
       reject,
       settled: false,

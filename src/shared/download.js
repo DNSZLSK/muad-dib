@@ -24,6 +24,7 @@ const { execFileSync } = require('child_process');
 const AdmZip = require('adm-zip');
 const { MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE } = require('./constants.js');
 const { registryAuthHeaders } = require('./registry-auth.js');
+const { auditTarGz } = require('./tar-audit.js');
 
 // Allowed redirect domains for tarball downloads (SSRF protection)
 const ALLOWED_DOWNLOAD_DOMAINS = [
@@ -314,7 +315,38 @@ function _extractTarGzImpl(tgzPath, destDir) {
   const tgzDir = path.dirname(path.resolve(tgzPath));
   const tgzName = path.basename(tgzPath);
   const relDest = path.relative(tgzDir, path.resolve(destDir)) || '.';
-  execFileSync('tar', ['xzf', tgzName, '-C', relDest, '--no-same-owner'], { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
+  let tarError = null;
+  try {
+    execFileSync('tar', ['xzf', tgzName, '-C', relDest, '--no-same-owner'], { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
+  } catch (err) {
+    // SECURITY (partial-extraction evasion, 2026-11-14): GNU tar and bsdtar extract every
+    // member they accept and exit non-zero on the ones they refuse ('..' names, writes through
+    // a symlink). npm skips such entries and installs the rest (verified 2026-11-14 with a
+    // real npm install: npm 10.9.0 Linux and 11.14.1 Windows exit 0 and require() loads the
+    // package), so throwing here left an installable malicious package unscanned. Keep what was extracted and report it.
+    // Still thrown: timeout/signal (status null), tar missing, or nothing extracted at all.
+    if (typeof err.status !== 'number' || !_hasAnyEntry(destDir)) throw err;
+    const stderr = err.stderr ? err.stderr.toString('utf8') : '';
+    tarError = (stderr.trim() || err.message || 'tar exited non-zero').slice(0, 500);
+  }
+  const dir = _tarPackageRoot(destDir);
+  if (tarError === null) return { dir, partial: false };
+  const audit = auditTarGz(tgzPath);
+  return {
+    dir,
+    partial: true,
+    tarError,
+    hostileMembers: audit.hostileMembers,
+    auditTruncated: audit.truncated,
+    auditError: audit.error || null
+  };
+}
+
+function _hasAnyEntry(dir) {
+  try { return fs.readdirSync(dir).length > 0; } catch { return false; }
+}
+
+function _tarPackageRoot(destDir) {
   // npm tarballs extract into a package/ subdirectory; detect it
   const packageSubdir = path.join(destDir, 'package');
   try {
@@ -396,10 +428,51 @@ function _extractZipImpl(zipPath, destDir) {
  * @throws {Error} when the format is unknown or extraction fails
  */
 function extractArchive(archivePath, destDir, options = {}) {
+  return extractArchiveDetailed(archivePath, destDir, options).dir;
+}
+
+/**
+ * Same as extractArchive, but returns the extraction report so the caller can scan a
+ * partial extraction and attach its findings (see extractionFindings).
+ * Zip archives keep the all-or-nothing refusal: pip refuses to install a wheel with an
+ * escaping entry, so a refused wheel is not an installable evasion.
+ *
+ * @returns {{ dir: string, partial: boolean, tarError?: string,
+ *   hostileMembers?: Array<{name: string, reason: string, via?: string}>,
+ *   auditTruncated?: boolean, auditError?: string|null }}
+ */
+function extractArchiveDetailed(archivePath, destDir, options = {}) {
   const format = options.format || detectArchiveFormat(archivePath);
   if (format === 'targz') return _extractTarGzImpl(archivePath, destDir);
-  if (format === 'zip') return _extractZipImpl(archivePath, destDir);
+  if (format === 'zip') return { dir: _extractZipImpl(archivePath, destDir), partial: false };
   throw new Error(`Unsupported archive format for ${path.basename(archivePath)}`);
+}
+
+/**
+ * Threats describing an extraction report, injected into the scan through the
+ * `extractionFindings` option. Empty for a complete extraction.
+ * @param {Object} report - extractArchiveDetailed result
+ * @returns {Array<Object>}
+ */
+function extractionFindings(report) {
+  if (!report || !report.partial) return [];
+  const threats = [];
+  const hostile = Array.isArray(report.hostileMembers) ? report.hostileMembers : [];
+  for (const m of hostile) {
+    threats.push({
+      type: 'archive_hostile_member',
+      severity: 'HIGH',
+      message: `Archive member refused by the extractor (${m.reason}${m.via ? ' via ' + m.via : ''}): ${m.name}. Packers (npm pack, python -m build) never produce such a member; tar refuses it and exits non-zero, which hides the package from scanners that abort on a tar failure, while npm skips the entry and installs the rest.`,
+      file: 'package.json'
+    });
+  }
+  threats.push({
+    type: 'archive_partial_extraction',
+    severity: 'LOW',
+    message: `Partial extraction: tar refused part of the archive, only the extracted members were scanned (${report.tarError || 'tar exited non-zero'})${report.auditError ? '; member audit failed: ' + report.auditError : ''}.`,
+    file: 'package.json'
+  });
+  return threats;
 }
 
 // Hard cap for off-thread extraction (OOM fix). Large legit packages can take
@@ -454,7 +527,7 @@ function extractArchiveOffThread(archivePath, destDir, options = {}) {
  * import it by name. New code should call extractArchive instead.
  */
 function extractTarGz(tgzPath, destDir) {
-  return _extractTarGzImpl(tgzPath, destDir);
+  return _extractTarGzImpl(tgzPath, destDir).dir;
 }
 
 /**
@@ -478,6 +551,8 @@ module.exports = {
   downloadToFile,
   extractTarGz,
   extractArchive,
+  extractArchiveDetailed,
+  extractionFindings,
   extractArchiveOffThread,
   detectArchiveFormat,
   _readGzipUncompressedHint: readGzipUncompressedHint,
