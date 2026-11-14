@@ -325,19 +325,21 @@ async function runDownloadTests() {
       walk(root);
       return out;
     };
-    // One-member ustar archive with an arbitrary (hostile) member name, gzipped.
-    const hostileTgz = (name, body) => {
+    // Hand-built ustar member (type '0' file or '2' symlink) with an arbitrary, hostile name.
+    const tarMember = (name, body, type = '0', linkname = '') => {
       const header = Buffer.alloc(512);
       header.write(name, 0, 100, 'utf8');
       header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116);
       header.write(body.length.toString(8).padStart(11, '0') + '\0', 124);
       header.write('00000000000\0', 136);
-      header.write('        ', 148); header.write('0', 156); header.write('ustar\0', 257); header.write('00', 263);
+      header.write('        ', 148); header.write(type, 156); header.write(linkname, 157, 100, 'utf8');
+      header.write('ustar\0', 257); header.write('00', 263);
       let sum = 0; for (const b of header) sum += b;
       header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
-      const data = Buffer.concat([body, Buffer.alloc((512 - (body.length % 512)) % 512)]);
-      return zlib.gzipSync(Buffer.concat([header, data, Buffer.alloc(1024)]));
+      return Buffer.concat([header, body, Buffer.alloc((512 - (body.length % 512)) % 512)]);
     };
+    const tgzOf = (...members) => zlib.gzipSync(Buffer.concat([...members, Buffer.alloc(1024)]));
+    const hostileTgz = (name, body) => tgzOf(tarMember(name, body));
 
     test('DOWNLOAD: control - the hand-built tar extracts a normal member (fixture is valid)', () => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarok-'));
@@ -361,6 +363,26 @@ async function runDownloadTests() {
         try { extractArchive(tgz, dest); } catch { /* refusing the archive is fine */ }
         const outside = listOutside(root, dest).filter(p => p !== tgz);
         assert(outside.length === 0, 'tar wrote outside destDir: ' + JSON.stringify(outside));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    // Tar slip through a symlink: member 1 is a symlink "link" -> "../outside", member 2 a file
+    // "link/pwned.txt" written THROUGH it. Refusing ".." in member names does not cover this;
+    // safe extraction needs tar to delay symlinks (GNU) or refuse to write through them (bsdtar).
+    test('DOWNLOAD: a tar symlink member cannot be used to write outside destDir', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarsymslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        const outside = path.join(root, 'outside');
+        fs.mkdirSync(dest);
+        fs.mkdirSync(outside);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, tgzOf(
+          tarMember('link', Buffer.alloc(0), '2', '../outside'),
+          tarMember('link/pwned.txt', Buffer.from('pwned'))));
+        try { extractArchive(tgz, dest); } catch { /* refusing the archive is fine */ }
+        assert(!fs.existsSync(path.join(outside, 'pwned.txt')), 'a file was written outside destDir through the symlink');
+        assert(fs.readdirSync(outside).length === 0, 'the outside directory must stay empty: ' + JSON.stringify(fs.readdirSync(outside)));
       } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
