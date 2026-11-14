@@ -33,6 +33,11 @@ function build(compactPath, outDir) {
   if (!Number.isFinite(updated) || Date.now() - updated > MAX_SOURCE_AGE_MS) {
     fail(`compact database is not fresh (updated: ${Number.isFinite(updated) ? new Date(updated).toISOString() : 'missing'}): the scrape did not rewrite it, refusing to publish`);
   }
+  let declared = [];
+  try { declared = JSON.parse(fs.readFileSync(compactPath, 'utf8')).sources || []; } catch { /* checked above */ }
+  if (Array.isArray(declared) && declared.includes('osm')) {
+    fail('compact database declares a local-only source: refusing to publish');
+  }
   const n = countCompactPackages(compactPath);
   if (n < MIN_COMPACT_PACKAGES) fail(`compact database has ${n} npm entries, below ${MIN_COMPACT_PACKAGES}: refusing to publish`);
   fs.mkdirSync(outDir, { recursive: true });

@@ -604,6 +604,32 @@ function writeLeanIOCFile(fullIOCs) {
   }
 }
 
+// Feeds licensed for local use only: their entries stay in the full local database and never
+// enter the compact file, which is what gets published (git, the ioc-db release). An entry also
+// reported by a redistributable feed is kept: it is published on the strength of that feed.
+const LOCAL_ONLY_SOURCES = new Set(['osm']);
+
+function _sourceNames(p) {
+  const names = [];
+  if (Array.isArray(p.sources)) {
+    for (const s of p.sources) names.push(s && typeof s === 'object' ? s.name : s);
+  }
+  if (typeof p.source === 'string') names.push(p.source);
+  if (p.freshness && typeof p.freshness.source === 'string') names.push(p.freshness.source);
+  return names.filter(n => typeof n === 'string' && n.length > 0);
+}
+
+/**
+ * True when every source of the entry is local-only: such an entry must not be published.
+ * An entry with no source information is legacy data from the other feeds and is kept.
+ * @param {Object} p
+ * @returns {boolean}
+ */
+function isLocalOnlyIOC(p) {
+  const names = _sourceNames(p);
+  return names.length > 0 && names.every(n => LOCAL_ONLY_SOURCES.has(n));
+}
+
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
   const versioned = Object.create(null);
@@ -611,6 +637,7 @@ function generateCompactIOCs(fullIOCs) {
   const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
   for (const p of fullIOCs.packages || []) {
+    if (isLocalOnlyIOC(p)) continue;
     if (p.severity && p.severity !== 'critical') {
       if (DANGEROUS_KEYS.has(p.name) || DANGEROUS_KEYS.has(p.version)) continue;
       if (!severityOverrides[p.name]) severityOverrides[p.name] = Object.create(null);
@@ -642,6 +669,7 @@ function generateCompactIOCs(fullIOCs) {
   const pypiVersioned = Object.create(null);
 
   for (const p of fullIOCs.pypi_packages || []) {
+    if (isLocalOnlyIOC(p)) continue;
     if (p.version === '*') {
       if (NEVER_WILDCARD_PYPI.has(p.name)) continue;
       pypiWildcards.push(p.name);
@@ -661,7 +689,7 @@ function generateCompactIOCs(fullIOCs) {
     markers: fullIOCs.markers || [],
     files: fullIOCs.files || [],
     updated: fullIOCs.updated,
-    sources: fullIOCs.sources
+    sources: Array.isArray(fullIOCs.sources) ? fullIOCs.sources.filter(s => !LOCAL_ONLY_SOURCES.has(s)) : fullIOCs.sources
   };
 
   if (Object.keys(severityOverrides).length > 0) {
@@ -826,4 +854,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, getLeanStatus, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, isLocalOnlyIOC, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, getLeanStatus, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
