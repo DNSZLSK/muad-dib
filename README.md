@@ -132,7 +132,7 @@ muaddib scan . --fail-on high      # Fail on HIGH and CRITICAL (default)
 muaddib scan . --fail-on-inconclusive  # Also fail when the analysis is INCONCLUSIVE (fail closed)
 ```
 
-A scan is `INCONCLUSIVE` when an internal bound was reached (timeout, graph size, file cap): some code was not fully analyzed and findings may be missing. The JSON carries `analysis.status`, SARIF carries error-level tool notifications. By default the exit code ignores it; use `--fail-on-inconclusive` in CI to treat a partial analysis as a failure.
+A scan is `INCONCLUSIVE` when an internal bound was reached (timeout, graph size, file cap): some code was not fully analyzed and findings may be missing. The JSON carries `analysis.status`, SARIF carries error-level tool notifications. By default the exit code ignores it; use `--fail-on-inconclusive` in CI to treat a partial analysis as a failure. Measured rate: 3.8 % of 395 packages drawn through npm search (mostly packages with more than 500 source files), 21.8 % of packages the monitor had already flagged; see CHANGELOG.
 
 ### Paranoid mode
 
