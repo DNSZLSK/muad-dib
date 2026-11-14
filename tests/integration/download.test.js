@@ -309,6 +309,87 @@ async function runDownloadTests() {
     catch { threw = true; }
     assert(threw, 'must reject when the archive does not exist (callers then fall back to metadata)');
   });
+
+  // --- zip slip / tar ".." (lint follow-up 2026-11-14): the documented reason for allowing
+  // non-literal fs paths in download.js is that archive member names never escape destDir.
+  // Each case builds root/dest and checks that nothing appears in root outside dest.
+  {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const zlib = require('zlib');
+    const { extractArchive } = require('../../src/shared/download.js');
+    const listOutside = (root, dest) => {
+      const out = [];
+      const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (p === dest) continue; if (e.isDirectory()) walk(p); else out.push(p); } };
+      walk(root);
+      return out;
+    };
+    // One-member ustar archive with an arbitrary (hostile) member name, gzipped.
+    const hostileTgz = (name, body) => {
+      const header = Buffer.alloc(512);
+      header.write(name, 0, 100, 'utf8');
+      header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116);
+      header.write(body.length.toString(8).padStart(11, '0') + '\0', 124);
+      header.write('00000000000\0', 136);
+      header.write('        ', 148); header.write('0', 156); header.write('ustar\0', 257); header.write('00', 263);
+      let sum = 0; for (const b of header) sum += b;
+      header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+      const data = Buffer.concat([body, Buffer.alloc((512 - (body.length % 512)) % 512)]);
+      return zlib.gzipSync(Buffer.concat([header, data, Buffer.alloc(1024)]));
+    };
+
+    test('DOWNLOAD: control - the hand-built tar extracts a normal member (fixture is valid)', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarok-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'ok.tgz');
+        fs.writeFileSync(tgz, hostileTgz('safe.txt', Buffer.from('fine')));
+        extractArchive(tgz, dest);
+        assert(fs.existsSync(path.join(dest, 'safe.txt')), 'a normal member must be extracted, else the traversal test proves nothing');
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    test('DOWNLOAD: a tar member named ../escape.txt never lands outside destDir', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, hostileTgz('../escape.txt', Buffer.from('pwned')));
+        try { extractArchive(tgz, dest); } catch { /* refusing the archive is fine */ }
+        const outside = listOutside(root, dest).filter(p => p !== tgz);
+        assert(outside.length === 0, 'tar wrote outside destDir: ' + JSON.stringify(outside));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    test('DOWNLOAD: a zip entry named ../escape.txt is refused before anything is written', () => {
+      const AdmZip = require('adm-zip');
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-zipslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const zip = new AdmZip();
+        zip.addFile('ok.txt', Buffer.from('ok'));
+        // adm-zip strips "../" when writing, so write a same-length placeholder and patch the raw
+        // name bytes (local header + central directory; the name is not covered by the CRC).
+        zip.addFile('zzzescape.txt', Buffer.from('pwned'));
+        const zp = path.join(root, 'evil.zip');
+        const raw = zip.toBuffer();
+        let at = raw.indexOf('zzzescape.txt');
+        while (at !== -1) { raw.write('../', at, 'latin1'); at = raw.indexOf('zzzescape.txt', at + 1); }
+        fs.writeFileSync(zp, raw);
+        const names = new AdmZip(zp).getEntries().map(e => e.entryName);
+        assert(names.includes('../escape.txt'), 'fixture must really carry a "../" entry, got ' + JSON.stringify(names));
+        let threw = false;
+        try { extractArchive(zp, dest); } catch (e) { threw = /escapes destDir/.test(e.message); }
+        assert(threw, 'extractArchive must refuse the zip with an "escapes destDir" error');
+        assert(listOutside(root, dest).filter(p => p !== zp).length === 0, 'nothing may be written outside destDir');
+        assert(fs.readdirSync(dest).length === 0, 'refused before extraction: dest stays empty');
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+  }
 }
 
 module.exports = { runDownloadTests };

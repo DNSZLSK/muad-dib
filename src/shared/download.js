@@ -169,6 +169,12 @@ async function safeDnsResolve(hostname) {
  */
 const MAX_REDIRECTS = 5;
 
+/* eslint-disable security/detect-non-literal-fs-filename -- reviewed 2026-11-14 (zip-slip audit):
+   from here to extractArchive, every fs path is either a destination chosen by an internal caller
+   (a temp dir it created: destPath, destDir, tgzPath) or derived from it with path.join on a
+   constant ("package") or on a name already listed in destDir after extraction. Names coming from
+   inside an archive never reach fs here: zip entries are resolved and refused if they escape destDir
+   before extractAllTo, and tar refuses ".." members by default (GNU tar and bsdtar). */
 function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
   // DNS rebinding protection: validate hostname before connecting
   const parsedUrl = new URL(url);
@@ -376,6 +382,7 @@ function _extractZipImpl(zipPath, destDir) {
   } catch { /* ignore — fall back to destDir */ }
   return destDir;
 }
+/* eslint-enable security/detect-non-literal-fs-filename */
 
 /**
  * Extract an archive to a directory, dispatching on file extension.
