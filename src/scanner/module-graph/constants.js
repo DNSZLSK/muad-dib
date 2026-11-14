@@ -24,7 +24,11 @@ const { ACORN_OPTIONS: BASE_ACORN_OPTIONS } = require('../../shared/constants.js
 // --- Bounded path limits ---
 const MAX_GRAPH_NODES = 5000; // Max files in dependency graph (covers ~99.5% of npm packages — audit DF-C1 v2.11.15)
 const MAX_GRAPH_EDGES = 400;  // Max total import edges
-const MAX_FLOWS = 20;         // Max cross-file flow findings per package
+const MAX_FLOWS = 20;         // Max cross-file flow findings per package, applied AFTER the first-party destination filter
+// Max raw candidates collected before that filter. Applying MAX_FLOWS before the filter let
+// 20 decoy flows to a benign destination consume the quota and hide the real one (audit
+// 2026-09-29). Reaching this bound marks the analysis INCONCLUSIVE.
+const MAX_FLOW_CANDIDATES = 200;
 const MAX_TAINT_DEPTH = 50;   // Max AST recursion depth (DoS guard)
 
 // --- Sensitive source patterns ---
@@ -59,7 +63,7 @@ const NON_NETWORK_SINK_RECEIVER_ROOTS = new Set(['process', 'console']);
 
 
 module.exports = {
-  MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_TAINT_DEPTH,
+  MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_FLOW_CANDIDATES, MAX_TAINT_DEPTH,
   SENSITIVE_MODULES, ACORN_OPTIONS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS,
   NON_NETWORK_SINK_RECEIVER_ROOTS
 };

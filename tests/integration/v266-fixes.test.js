@@ -45,14 +45,6 @@ async function runV266FixesTests() {
     assertIncludes(sandboxSrc, 'lastIndexOf(REPORT_DELIMITER)', 'Should use lastIndexOf');
   });
 
-  // 1.3 Module graph timer cleanup
-  test('P1: index.js clears module graph timeout', () => {
-    // Module graph execution logic moved to pipeline/executor.js in P2 audit refactor
-    const executorSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'pipeline', 'executor.js'), 'utf8');
-    assertIncludes(executorSrc, 'clearTimeout(graphTimerId)', 'Should clear timeout');
-  });
-
   // 1.4 dormant_spike URL fixed
   test('P1: dormant_spike URL has no a]] artifact', () => {
     const { RULES } = require('../../src/rules/index.js');

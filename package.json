@@ -13,7 +13,7 @@
     "fp-clusters": "node scripts/analyze-fp-clusters.js",
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
-    "lint": "eslint src bin --max-warnings 1120",
+    "lint": "eslint src bin --max-warnings 105",
     "test:coverage": "c8 npm test",
     "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-overrides.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm run lint && npm test",
     "docs:stats": "node scripts/collect-stats.js && node scripts/sync-stats.js",

@@ -26,6 +26,10 @@
 const fs = require('fs');
 const path = require('path');
 const { resolveLocal, extractLocalImports, parseFile, toRel, isFileExists } = require('./module-graph');
+const { markIncomplete } = require('../shared/completeness.js');
+
+// Max functions dequeued by the intra-file BFS (DoS bound).
+const MAX_FN_BFS_STEPS = 5000;
 
 /**
  * Recursively extract file paths from the package.json `exports` field.
@@ -889,10 +893,20 @@ function _analyzeFunctionReachability(ast) {
   for (const seed of seeds) activate(seed);
 
   let safety = 0;
-  while (queue.length > 0 && safety++ < 5000) {
+  while (queue.length > 0 && safety++ < MAX_FN_BFS_STEPS) {
     const fn = queue.shift();
     const calleeNames = _calleeIdentifierNames(fn.bodyNode);
     for (const name of calleeNames) activate(name);
+  }
+
+  // Bound reached with work still queued: the unvisited callees are unknown,
+  // not dead. Classifying them dead let a long call chain downgrade the real
+  // payload as unreachable_function (audit 2026-09-29). Abstain for the whole
+  // file (no dead ranges, same as the dynamic fail-open) and mark the analysis
+  // INCONCLUSIVE.
+  if (queue.length > 0) {
+    markIncomplete('reachability', 'function-bfs-limit', { limit: MAX_FN_BFS_STEPS });
+    return { dynamic: false, dynamicFailOpen, dynamicFnCount: dynamicFnSet.size, bfsTruncated: true, deadRanges: [] };
   }
 
   const deadRanges = [];

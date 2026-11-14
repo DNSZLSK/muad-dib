@@ -1108,6 +1108,7 @@ const CLEAN_LEDGER_OUTCOMES = new Set([
  * @param {string[]} [e.types]    threat types (capped to 12)
  * @param {string} [e.sandbox]    'none' | 'run' | 'deferred' | 'skip'
  * @param {boolean} [e.firstPublish]
+ * @param {string} [e.analysisStatus] 'COMPLETE' | 'INCONCLUSIVE' (recorded only when INCONCLUSIVE)
  * @param {string} [e.source]     where the record originated ('scan','queue_cap',...)
  */
 function appendScanLedger(e) {
@@ -1131,6 +1132,9 @@ function appendScanLedger(e) {
       // rollup separate "first-publish lost" from "spam extra dropped (expected)".
       // Only written when true to keep the 127MB ledger lean.
       ...(e.isBurstExtra ? { isBurstExtra: true } : {}),
+      // Incompleteness contract (architecture lot 1): only written when the scan
+      // was INCONCLUSIVE, same lean-ledger rule as isBurstExtra. No routing change.
+      ...(e.analysisStatus === 'INCONCLUSIVE' ? { analysisStatus: 'INCONCLUSIVE' } : {}),
       source: e.source || 'scan'
     };
     fs.appendFileSync(SCAN_LEDGER_FILE, JSON.stringify(entry) + '\n', 'utf8');

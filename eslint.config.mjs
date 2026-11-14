@@ -27,10 +27,15 @@ export default defineConfig([
       "security/detect-eval-with-expression": "warn",
       "security/detect-new-buffer": "warn",
       "security/detect-no-csrf-before-method-override": "warn",
-      "security/detect-non-literal-fs-filename": "warn",
+      // Off (2026-11-14, 1074 of 1121 warnings, none actionable): a scanner reads the files of the
+      // package under analysis by design (non-literal fs paths everywhere), and object-injection
+      // flags every obj[variable] access. The real risk behind the latter, prototype pollution,
+      // is handled in code (DANGEROUS_KEYS, JSON.parse own keys) and fuzzed (tests/fuzz-test.js,
+      // real "__proto__" keys). Keeping 1074 noise warnings hid the few that matter (ReDoS).
+      "security/detect-non-literal-fs-filename": "off",
       "security/detect-non-literal-regexp": "warn",
       "security/detect-non-literal-require": "warn",
-      "security/detect-object-injection": "warn",
+      "security/detect-object-injection": "off",
       "security/detect-possible-timing-attacks": "warn",
       "security/detect-pseudoRandomBytes": "warn",
       "security/detect-unsafe-regex": "warn",
@@ -41,6 +46,26 @@ export default defineConfig([
     files: ["**/*.js"],
     languageOptions: {
       sourceType: "script"
+    }
+  },
+  {
+    // Except where a path segment comes from outside (archive entries, registry package names,
+    // downloaded feeds): there a non-literal path can escape the target directory (zip slip,
+    // "../" in a package name), so every hit must be justified or guarded.
+    files: [
+      "src/shared/download.js",
+      "src/shared/extract-pool.js",
+      "src/shared/extract-pool-worker.js",
+      "src/shared/extract-worker.js",
+      "src/monitor/tarball-archive.js",
+      "src/monitor/tarball-prefetch.js",
+      "src/ioc/scraper.js",
+      "src/ioc/updater.js",
+      "src/sandbox/index.js",
+      "src/commands/safe-install.js"
+    ],
+    rules: {
+      "security/detect-non-literal-fs-filename": "warn"
     }
   },
   {
