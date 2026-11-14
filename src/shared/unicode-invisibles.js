@@ -140,6 +140,79 @@ function countInvisibleUnicode(content) {
   return count;
 }
 
+// Invisible codepoints that legacy single-byte codepages map to real slots:
+// LRM/RLM (windows-1255/1256, iso-8859-8), ZWNJ/ZWJ (windows-1256), ZWSP and
+// BOM (macthai). Variation selectors, tag characters and bidi overrides are in
+// no codepage, so they are never exempted.
+const CODEPAGE_INVISIBLES = new Set([0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF]);
+const TABLE_MIN = 128;
+const TABLE_MAX = 256;
+const TABLE_MIN_DISTINCT = 0.9;
+
+/**
+ * Number of invisible codepoints in `lit` (a string literal body) that sit in
+ * a charset decoding table: 128-256 codepoints, >= 90 % distinct (U+FFFD,
+ * the unmapped-slot filler, ignored), every invisible one is a codepage
+ * invisible and appears at most once. Returns 0 when `lit` is not such a table.
+ *
+ * Capacity bound: each exempt codepoint appears at most once per table, so a
+ * table carries at most the order of 6 symbols (< 10 bits): it cannot hold an
+ * invisible-encoded payload.
+ */
+function charsetTableInvisibles(lit) {
+  const cps = Array.from(lit);
+  if (cps.length < TABLE_MIN || cps.length > TABLE_MAX) return 0;
+  const seen = new Set();
+  let mapped = 0;
+  let invisible = 0;
+  for (let i = 0; i < cps.length; i++) {
+    const cp = cps[i].codePointAt(0);
+    if (cp === 0xFFFD) continue;
+    mapped++;
+    if (inspectCodepoint(cps[i], 0).invisible) {
+      if (!CODEPAGE_INVISIBLES.has(cp) || seen.has(cp)) return 0;
+      invisible++;
+    }
+    seen.add(cp);
+  }
+  if (mapped === 0 || seen.size / mapped < TABLE_MIN_DISTINCT) return 0;
+  return invisible;
+}
+
+/**
+ * Count invisible codepoints like countInvisibleUnicode, minus those that sit
+ * in charset decoding tables (iconv-lite `sbcs-data-generated.js` and its
+ * vendored copies). String literals are found by a single linear scan that
+ * never crosses a newline, so a stray quote in a comment desynchronizes at
+ * most one line.
+ *
+ * @param {string} content
+ * @returns {number}
+ */
+function countInvisibleUnicodeOutsideCharsetTables(content) {
+  const total = countInvisibleUnicode(content);
+  if (total === 0) return 0;
+  let exempt = 0;
+  let i = 0;
+  const n = content.length;
+  while (i < n) {
+    const q = content[i];
+    if (q !== '"' && q !== '\'') { i++; continue; }
+    let j = i + 1;
+    let escaped = false;
+    while (j < n && content[j] !== '\n') {
+      if (escaped) escaped = false;
+      else if (content[j] === '\\') escaped = true;
+      else if (content[j] === q) break;
+      j++;
+    }
+    if (j >= n || content[j] !== q) { i = j + 1; continue; } // unterminated on this line
+    if (j - i - 1 >= TABLE_MIN) exempt += charsetTableInvisibles(content.slice(i + 1, j));
+    i = j + 1;
+  }
+  return total - exempt;
+}
+
 /**
  * Return a copy of `content` with all invisible codepoints removed.
  *
@@ -179,5 +252,6 @@ function stripInvisibleUnicode(content) {
 
 module.exports = {
   countInvisibleUnicode,
+  countInvisibleUnicodeOutsideCharsetTables,
   stripInvisibleUnicode
 };
