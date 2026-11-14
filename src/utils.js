@@ -99,11 +99,28 @@ function isDevFile(relativePath) {
 }
 
 /**
- * Maximum number of files to scan per package.
- * Malware packages rarely have >50 JS files; 500 is a generous safety margin.
- * Prevents large SDKs (1000+ files) from monopolizing scan time.
+ * Maximum number of files to scan per package (files beyond it get the regex quick-scan
+ * only, and the scan is INCONCLUSIVE). 2000 since architecture lot 3: on the 14 packages
+ * of a 395-package random npm sample that exceeded the former 500, raising it to 2000
+ * cost at most +19 s and +230 MB per scan, raised no score, made 5 of them COMPLETE, and
+ * removed quick-scan findings (regex exec/spawn in overflow files) that full analysis does
+ * not confirm; 5000 went above 60 s and 1.4 GB.
  */
-const MAX_SCAN_FILES = 500;
+const MAX_SCAN_FILES = 2000;
+let _maxScanFiles = MAX_SCAN_FILES;
+
+/** Current file cap (MAX_SCAN_FILES unless a test lowered it). */
+function getMaxScanFiles() {
+  return _maxScanFiles;
+}
+
+// Test-only: lower the cap so the overflow / quick-scan behaviour tests need a few files
+// instead of 2000. Returns the previous value; callers restore it in a finally block.
+function _setMaxScanFilesForTest(n) {
+  const prev = _maxScanFiles;
+  _maxScanFiles = n;
+  return prev;
+}
 
 /**
  * Generic recursive file finder with symlink protection and depth limit.
@@ -124,7 +141,7 @@ function findFiles(dir, options = {}) {
     extensions = ['.js'],
     excludedDirs = EXCLUDED_DIRS,
     maxDepth = 100,
-    maxFiles = MAX_SCAN_FILES,
+    maxFiles = _maxScanFiles,
     results = [],
     visitedInodes = new Set(),
     visitedPaths = new Set(),
@@ -145,10 +162,17 @@ function findFiles(dir, options = {}) {
     if (cached) return [...cached]; // return copy to prevent mutation
     const result = _findFilesImpl(dir, { extensions: extensionsLower, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
 
-    // Apply file count cap: sort by depth (shallowest first) so root-level files
-    // (most likely to contain malicious entry points) are prioritized.
+    // Apply file count cap. Files the package executes (entry points, bin, exports,
+    // lifecycle targets and what they require or spawn) go first, so a payload that runs
+    // cannot be pushed past the cap by padding the package with decoy files; the file
+    // order and the directory depth are both chosen by the package author. The rest
+    // follows by depth (shallowest first), as before.
     if (maxFiles > 0 && result.length > maxFiles) {
+      const executed = _executedFilesFor(dir);
+      const rank = f => (executed.has(path.relative(dir, f).split(path.sep).join('/')) ? 0 : 1);
       result.sort((a, b) => {
+        const byExecuted = rank(a) - rank(b);
+        if (byExecuted !== 0) return byExecuted;
         const depthA = a.split(path.sep).length;
         const depthB = b.split(path.sep).length;
         return depthA - depthB;
@@ -165,6 +189,22 @@ function findFiles(dir, options = {}) {
   }
 
   return _findFilesImpl(dir, { extensions: extensionsLower, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
+}
+
+// Executed files of the package rooted at dir (relative, '/'-separated), for the cap order.
+// Lazy require: analyze-helper requires this module. The reentrancy guard keeps a future
+// findFiles call made while computing reachability from recursing into this path.
+let _computingExecuted = false;
+function _executedFilesFor(dir) {
+  if (_computingExecuted) return new Set();
+  _computingExecuted = true;
+  try {
+    return require('./shared/analyze-helper.js').executedFiles(dir);
+  } catch {
+    return new Set();
+  } finally {
+    _computingExecuted = false;
+  }
 }
 
 function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth }) {
@@ -493,6 +533,8 @@ function renderScoreBar(score) {
 module.exports = {
   EXCLUDED_DIRS,
   MAX_SCAN_FILES,
+  getMaxScanFiles,
+  _setMaxScanFilesForTest,
   DEV_PATTERNS,
   isDevFile,
   findFiles,

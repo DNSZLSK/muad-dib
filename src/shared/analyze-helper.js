@@ -121,4 +121,4 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   return threats;
 }
 
-module.exports = { analyzeWithDeobfuscation };
+module.exports = { analyzeWithDeobfuscation, executedFiles };

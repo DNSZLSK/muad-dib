@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { test, asyncTest, assert, assertIncludes, runScan, runScanDirect, runScanCached, runScanFast, cleanupTemp, TESTS_DIR } = require('../test-utils');
+const { _setMaxScanFilesForTest } = require('../../src/utils.js');
 
 function makeTempPkg(jsContent, fileName = 'index.js') {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-ast-'));
@@ -3416,7 +3417,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
     } finally { cleanupTemp(tmp); }
   });
   // ================================================================
-  // Quick-scan overflow — files beyond 500 cap
+  // Quick-scan overflow — files beyond the cap (lowered to 500 here; real cap MAX_SCAN_FILES)
   // ================================================================
 
   await asyncTest('AST: quick-scan detects child_process in overflow files', async () => {
@@ -3431,12 +3432,13 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
     // These deep files should end up in overflow (sorted by depth, shallowest first)
     fs.writeFileSync(path.join(deepDir, 'evil1.js'), `const cp = require('child_process'); cp.exec('id');`);
     fs.writeFileSync(path.join(deepDir, 'evil2.js'), `require('child_process').execSync('whoami');`);
+    const prevCap = _setMaxScanFilesForTest(500);
     try {
       const result = await runScanDirect(tmp);
       const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
       assert(quickThreats.length > 0, 'Should find threats via quick-scan in overflow files');
       assert(quickThreats.some(t => t.type === 'dangerous_exec'), 'Should detect dangerous_exec in overflow');
-    } finally { cleanupTemp(tmp); }
+    } finally { _setMaxScanFilesForTest(prevCap); cleanupTemp(tmp); }
   });
 
   // --- v2.10.73 P3: Quick-scan downgrade HIGH → MEDIUM + degraded bucket cap ---
@@ -3454,6 +3456,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
     }
     // Overflow file with spawn() — simulates rsshub dist-lib pattern
     fs.writeFileSync(path.join(deepDir, 'route.mjs'), `export async function handler() { const { spawn } = require('child_process'); return spawn('ffmpeg', []); }`);
+    const prevCap = _setMaxScanFilesForTest(500);
     try {
       const result = await runScanDirect(tmp);
       const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
@@ -3466,7 +3469,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       // All should have degraded:true flag
       assert(dangerExec.every(t => t.degraded === true),
         'quick-scan dangerous_exec should be marked degraded:true');
-    } finally { cleanupTemp(tmp); }
+    } finally { _setMaxScanFilesForTest(prevCap); cleanupTemp(tmp); }
   });
 
   await asyncTest('AST P3: quick-scan Module._load stays CRITICAL (exception)', async () => {
@@ -3480,6 +3483,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
     // Overflow file with Module._load — attacker bypass, should stay CRITICAL.
     // Use literal `Module._load` (capital M) to match the quick-scan regex /\bModule\._load\b/.
     fs.writeFileSync(path.join(deepDir, 'evil.js'), `const Module = require('module'); Module._load('child_process');`);
+    const prevCap = _setMaxScanFilesForTest(500);
     try {
       const result = await runScanDirect(tmp);
       const mloadThreats = result.threats.filter(t =>
@@ -3488,7 +3492,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       assert(mloadThreats.length > 0, 'Should detect Module._load via quick-scan');
       assert(mloadThreats.every(t => t.severity === 'CRITICAL'),
         `Module._load should stay CRITICAL even in quick-scan, got: ${mloadThreats.map(t => t.severity).join(',')}`);
-    } finally { cleanupTemp(tmp); }
+    } finally { _setMaxScanFilesForTest(prevCap); cleanupTemp(tmp); }
   });
 
   await asyncTest('AST P3: degraded threats contribute at most 15 to package score', async () => {
@@ -3506,6 +3510,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       fs.writeFileSync(path.join(deepDir, `route${i}.mjs`),
         `export async function h${i}() { const { spawn } = require('child_process'); return spawn('ffmpeg'); }`);
     }
+    const prevCap = _setMaxScanFilesForTest(500);
     try {
       const result = await runScanDirect(tmp);
       // Verify many quick-scan threats were produced
@@ -3518,7 +3523,7 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       const score = result.summary?.riskScore || 0;
       assert(score <= 50,
         `Risk score should be capped by degraded bucket (expected ≤50, got ${score}). 20 MEDIUM quick-scan threats should not dominate score.`);
-    } finally { cleanupTemp(tmp); }
+    } finally { _setMaxScanFilesForTest(prevCap); cleanupTemp(tmp); }
   });
 
   // ================================================================
