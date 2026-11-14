@@ -110,12 +110,12 @@ jobs:
       - name: Scan a known-malicious dependency with an empty HOME
         run: node scripts/product-smoke.js "${RUNNER_TEMP}/inst/node_modules/muaddib-scanner/bin/muaddib.js" --expect detect
 
-  # Calibration phase: non-blocking until the budgets in tests/benchmark-budgets.json are set
-  # from the measurements of this runner (artifact benchmark-results), then blocking.
+  # Blocking. Budgets in tests/benchmark-budgets.json come from 14 runs of this job
+  # (ubuntu-latest): e2e about 2.5x the slowest run (run-to-run noise is about 2x),
+  # peak RSS about 30% above the highest peak (most of it is the IOC load).
   benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

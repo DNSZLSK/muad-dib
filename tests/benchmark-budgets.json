@@ -1,5 +1,5 @@
 {
-  "small": { "e2eMs": 2000, "rssMb": 1536 },
-  "medium": { "e2eMs": 8000, "rssMb": 1536 },
-  "large": { "e2eMs": 40000, "rssMb": 1536 }
+  "small": { "e2eMs": 600, "rssMb": 400 },
+  "medium": { "e2eMs": 1000, "rssMb": 400 },
+  "large": { "e2eMs": 5000, "rssMb": 600 }
 }
