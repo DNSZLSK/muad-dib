@@ -23,7 +23,16 @@ const SIGNATURE = 'ioc-db.manifest.sig';
 
 function fail(msg) { console.error('::error::' + msg); process.exit(1); }
 
+// The scrape stamps `updated`; a compact file older than this was not rewritten by this run
+// (failed or partial scrape, or the git copy) and must not be published as today's database.
+const MAX_SOURCE_AGE_MS = 48 * 60 * 60 * 1000;
+
 function build(compactPath, outDir) {
+  let updated = NaN;
+  try { updated = Date.parse(JSON.parse(fs.readFileSync(compactPath, 'utf8')).updated); } catch { /* unreadable: refused below */ }
+  if (!Number.isFinite(updated) || Date.now() - updated > MAX_SOURCE_AGE_MS) {
+    fail(`compact database is not fresh (updated: ${Number.isFinite(updated) ? new Date(updated).toISOString() : 'missing'}): the scrape did not rewrite it, refusing to publish`);
+  }
   const n = countCompactPackages(compactPath);
   if (n < MIN_COMPACT_PACKAGES) fail(`compact database has ${n} npm entries, below ${MIN_COMPACT_PACKAGES}: refusing to publish`);
   fs.mkdirSync(outDir, { recursive: true });

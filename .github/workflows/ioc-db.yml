@@ -38,8 +38,11 @@ jobs:
           node-version: '24'
           package-manager-cache: false
       - run: npm ci
+      # Full scrape (OSV, OSSF, GHSA, GenSecAI, DataDog, ...) that rewrites src/ioc/data/iocs-compact.json.
+      # Not `muaddib update`: that fast mode only adds a few small feeds to ~/.muaddib/data and leaves
+      # the compact file as committed, so the asset would be the git copy, possibly months old.
       - name: Scrape the IOC feeds (seeded from the git-tracked compact database)
-        run: node bin/muaddib.js update
+        run: node bin/muaddib.js scrape
       - name: Build the asset and its unsigned manifest
         run: node scripts/ioc-db.js build src/ioc/data/iocs-compact.json "${RUNNER_TEMP}/ioc-db"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

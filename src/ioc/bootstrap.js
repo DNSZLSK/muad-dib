@@ -350,7 +350,7 @@ async function ensureIOCs() {
     }
   } catch (err) {
     process.stderr.write('[WARN] Could not download the IOC database: ' + err.message + '\n');
-    process.stderr.write('[WARN] Known-malicious package detection is OFF for this scan (the scan is INCONCLUSIVE). Run "muaddib update" to build the database locally.\n');
+    process.stderr.write('[WARN] Known-malicious package detection is OFF for this scan (the scan is INCONCLUSIVE). Retry later, or run "muaddib scrape" to build the full database locally (several minutes).\n');
     return (_ensureIocsResult = false);
   }
 }

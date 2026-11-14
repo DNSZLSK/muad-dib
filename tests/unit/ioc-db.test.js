@@ -31,11 +31,11 @@ function keyPair() {
 }
 
 // A compact database with n wildcard entries (+ a marker name to find it after loading).
-function compactWith(n, marker) {
+function compactWith(n, marker, updated = new Date().toISOString()) {
   const wildcards = [];
   for (let i = 0; i < n; i++) wildcards.push('ioc-db-test-pkg-' + i);
   if (marker) wildcards.push(marker);
-  return { defaultSeverity: 'critical', wildcards, versioned: {}, pypi_wildcards: [], pypi_versioned: {}, hashes: [], markers: [], files: [], severityOverrides: {} };
+  return { updated, defaultSeverity: 'critical', wildcards, versioned: {}, pypi_wildcards: [], pypi_versioned: {}, hashes: [], markers: [], files: [], severityOverrides: {} };
 }
 
 // Release as the publish job would produce it: gz asset, manifest, signature.
@@ -209,6 +209,11 @@ async function runIocDbTests() {
       fs.writeFileSync(tooSmall, JSON.stringify(compactWith(5)));
       const r = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ioc-db.js'), 'build', tooSmall, path.join(dir, 'o2')], { encoding: 'utf8' });
       assert(r.status !== 0, 'a gutted database must never be published');
+      // A compact the scrape did not rewrite (the git copy, months old) must not be published as today's.
+      const stale = path.join(dir, 'stale.json');
+      fs.writeFileSync(stale, JSON.stringify(compactWith(N, null, '2026-08-20T10:09:38.576Z')));
+      const st = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ioc-db.js'), 'build', stale, path.join(dir, 'o3')], { encoding: 'utf8' });
+      assert(st.status !== 0 && /not fresh/.test(st.stderr), 'a stale compact must be refused: ' + st.stderr);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
