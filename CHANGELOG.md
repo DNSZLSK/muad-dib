@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `benchmark` CI job is blocking (lot 3 of the 2026-11 architecture plan, second part).** The budgets in `tests/benchmark-budgets.json` are set from 14 runs of the job on `ubuntu-latest` (2026-11-13 and 2026-11-14). Measured end-to-end: small 71-218 ms, medium 186-359 ms, large 984-1955 ms; peak RSS: small 262-297 MB, medium 291-303 MB, large 455-466 MB, of which 262-297 MB is the peak of the IOC load alone. Time varies by about 2x between runs, memory by about 2%. Budgets: end-to-end about 2.5x the slowest run (small 600 ms, medium 1 s, large 5 s), so runner noise does not fail the job but a scan more than about 2.5x slower does; peak RSS about 30% above the highest peak (400 MB small and medium, 600 MB large), which leaves room for the IOC database to grow and fails on an OOM-type blow-up. A moderate increase of the scan's own memory on small and medium is still below what the budget can see, since the IOC load dominates the peak.
+
 ## [2.12.3] - 2026-11-14
 
 ### Security
