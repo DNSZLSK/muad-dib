@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Release workflow publishes through npm trusted publishing (`.github/workflows/publish.yml`).** The 2.12.1 publish ran with an expired `NPM_TOKEN`: the job logged `+ muaddib-scanner@2.12.1` and succeeded, yet the registry never served the version (404). The workflow no longer uses a token: it publishes through the OIDC exchange (`id-token: write`, already granted for provenance), drops `setup-node`'s `registry-url` (its `.npmrc` expects `NODE_AUTH_TOKEN`, and any token takes precedence over OIDC), fails if npm is older than 11.5.1, and ends with a step that fails unless the registry serves the new version within 15 minutes. Requires the repository and `publish.yml` to be declared as trusted publisher in the npm package settings.
+- **Release workflow publishes through npm trusted publishing (`.github/workflows/publish.yml`).** The 2.12.1 publish ran with an expired `NPM_TOKEN`: the job logged `+ muaddib-scanner@2.12.1` and succeeded, yet the registry never served the version (404). The workflow no longer uses a token: it publishes through the OIDC exchange (`id-token: write`, already granted for provenance), keeps `setup-node`'s `registry-url` as in the npm trusted-publishing example (a first attempt without it ended in `ENEEDAUTH`), runs `npm publish` with `--loglevel verbose` so a failed OIDC exchange is visible in the job log, fails if npm is older than 11.5.1, and ends with a step that fails unless the registry serves the new version within 15 minutes. Requires the repository and `publish.yml` to be declared as trusted publisher in the npm package settings.
 
 ## [2.12.1] - 2026-11-14
 

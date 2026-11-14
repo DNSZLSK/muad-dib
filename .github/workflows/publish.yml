@@ -21,9 +21,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          # No `registry-url`: it writes an .npmrc that expects NODE_AUTH_TOKEN, and any token
-          # (even empty or expired) takes precedence over the OIDC trusted-publishing exchange.
-          # npm publishes to registry.npmjs.org by default.
+          # As in the npm trusted-publishing example (docs.npmjs.com/trusted-publishers). Removing
+          # it (2.12.1 first OIDC attempt) ended in ENEEDAUTH: the OIDC exchange did not happen.
+          registry-url: https://registry.npmjs.org
           # Release job: no dependency cache (cache poisoning, zizmor). setup-node >= v5
           # caches automatically when package.json declares npm as packageManager.
           package-manager-cache: false
@@ -70,7 +70,9 @@ jobs:
           node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); if (a*1e6+b*1e3+c < 11005001) { console.error("::error::npm " + process.argv[1] + " < 11.5.1: OIDC trusted publishing unsupported"); process.exit(1); }' "$V"
       # Trusted publishing (OIDC, id-token: write above): no NPM_TOKEN. The npm package settings
       # must list this repository and this workflow file as trusted publisher.
-      - run: npm publish --provenance --access public
+      # npm logs a failed OIDC exchange only at verbose level, then continues unauthenticated
+      # (ENEEDAUTH): verbose keeps the real reason in the job log.
+      - run: npm publish --provenance --access public --loglevel verbose
       - name: Verify the version is live on the registry
         # npm can accept an upload and still not publish it (2026-11-14: "+ muaddib-scanner@2.12.1"
         # then 404 for 10+ minutes with an expired token). A release is done only when the
