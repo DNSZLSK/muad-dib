@@ -80,3 +80,11 @@ sbom.json
 .env.example
 .build_dossier.py
 .dockerignore
+
+# Shipped by mistake up to 2.12.0 (2026-11-14): review verdicts (2.2 MB), the release job's own
+# self-scan, git hooks, CI linter config and the doc-stats source. None is read at runtime.
+audit-data/
+self-scan-*.json
+.githooks/
+zizmor.yml
+/stats.json
