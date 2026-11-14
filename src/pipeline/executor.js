@@ -39,6 +39,9 @@ const { deobfuscate } = require('../scanner/deobfuscate.js');
 const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_FLOWS } = require('../scanner/module-graph');
 const { markIncomplete, resetCompleteness } = require('../shared/completeness.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
+// Below this many npm IOC entries the database is considered absent: the YAML built-ins alone
+// hold a few dozen; a full database holds about 250 000.
+const MIN_LOADED_IOC_PACKAGES = 1000;
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
@@ -195,6 +198,21 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // Fresh incompleteness record for this scan (resetAll() also clears it at the
   // end; this guards direct execute() callers that never reach resetAll()).
   resetCompleteness();
+
+  // No IOC database = known-malicious package detection did not run: the scan is INCONCLUSIVE
+  // (lot 1 contract), never SAFE. Measured 2026-11-14: a fresh npm install of 2.12.2 scored a
+  // flatmap-stream@0.1.1 dependency 0 because the database download had been a 404 for months.
+  // Checked here, after the reset above (initialize() runs before it).
+  {
+    let iocPackageCount = 0;
+    try {
+      const iocs = loadCachedIOCs();
+      iocPackageCount = (iocs.packagesMap ? iocs.packagesMap.size : 0) + (iocs.wildcardPackages ? iocs.wildcardPackages.size : 0);
+    } catch { /* unreadable database counts as absent */ }
+    if (iocPackageCount < MIN_LOADED_IOC_PACKAGES) {
+      markIncomplete('iocs', 'database-unavailable', { limit: MIN_LOADED_IOC_PACKAGES, observed: iocPackageCount });
+    }
+  }
 
   // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;

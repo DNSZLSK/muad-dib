@@ -624,10 +624,14 @@ test('BOOTSTRAP: MIN_IOCS_SIZE is 1MB', () => {
   assert(MIN_IOCS_SIZE === 1_000_000, 'MIN_IOCS_SIZE should be 1000000, got ' + MIN_IOCS_SIZE);
 });
 
-test('BOOTSTRAP: IOCS_URL points to GitHub Releases', () => {
-  const { IOCS_URL } = require('../../src/ioc/bootstrap.js');
-  assert(IOCS_URL.startsWith('https://github.com/'), 'URL should start with https://github.com/');
-  assert(IOCS_URL.endsWith('iocs.json.gz'), 'URL should end with iocs.json.gz');
+test('BOOTSTRAP: the IOC database comes from the fixed ioc-db release, never releases/latest', () => {
+  // releases/latest pointed at version releases that stopped carrying the asset after v2.10.44:
+  // every fresh npm install got a 404 and scanned with no IOC (2026-11-14).
+  const { IOCS_URL, IOC_DB_MANIFEST_URL, IOC_DB_SIGNATURE_URL } = require('../../src/ioc/bootstrap.js');
+  for (const u of [IOCS_URL, IOC_DB_MANIFEST_URL, IOC_DB_SIGNATURE_URL]) {
+    assert(u.startsWith('https://github.com/DNSZLSK/muad-dib/releases/download/ioc-db/'), 'fixed ioc-db release: ' + u);
+    assert(!u.includes('/latest/'), 'never releases/latest: ' + u);
+  }
 });
 
 test('BOOTSTRAP: module exports all expected symbols', () => {
@@ -1050,19 +1054,17 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and
 
 await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully', async () => {
   bootstrapReset();
-  const origExists = fs.existsSync;
+  const { _setTestEnvironment } = require('../../src/ioc/bootstrap.js');
   const origStderr = process.stderr.write;
   const stderrOutput = [];
-  // Mock https.get to simulate network failure (never hit real network in tests)
+  // Hermetic: temp HOME, no local database (a source checkout has src/ioc/data/iocs-compact.json),
+  // network enabled but https.get mocked to fail (never hits the real network).
+  const tmpHome = fs.mkdtempSync(path.join(require('os').tmpdir(), 'muaddib-bootfail-'));
+  const savedNoFetch = process.env.MUADDIB_NO_REGISTRY_FETCH;
+  delete process.env.MUADDIB_NO_REGISTRY_FETCH;
+  _setTestEnvironment({ homeDataDir: tmpHome, localBundled: path.join(tmpHome, 'absent-a'), localCompact: path.join(tmpHome, 'absent-b') });
   const https = require('https');
   const origHttpsGet = https.get;
-  const BUNDLED_IOCS = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
-  fs.existsSync = (p) => {
-    if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
-    if (p === BOOTSTRAP_IOCS_PATH) return false; // IOCs don't exist
-    if (p === BUNDLED_IOCS) return false; // bundled IOCs also absent — force download path
-    return origExists(p);
-  };
   process.stderr.write = (msg) => { stderrOutput.push(msg); };
   https.get = (_url, _opts, _cb) => {
     const EventEmitter = require('events');
@@ -1074,10 +1076,14 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully',
   try {
     const result = await bootstrapEnsureIOCs();
     assert(result === false, 'Should return false when download fails');
+    assert(stderrOutput.join('').includes('detection is OFF'), 'the user is told detection is off: ' + stderrOutput.join(''));
   } finally {
-    fs.existsSync = origExists;
     process.stderr.write = origStderr;
     https.get = origHttpsGet;
+    _setTestEnvironment();
+    bootstrapReset();
+    if (savedNoFetch === undefined) delete process.env.MUADDIB_NO_REGISTRY_FETCH; else process.env.MUADDIB_NO_REGISTRY_FETCH = savedNoFetch;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
   }
 });
 

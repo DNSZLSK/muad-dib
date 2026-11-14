@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4545 tests across 169 files)
+npm test          # Run all tests (custom framework, 4545 tests across 170 files)
 npm run lint      # ESLint with security plugin (0 errors, warning ratchet)
 npm run test:coverage  # c8 + coverage floors (.c8rc.json)
 npm run scan      # Self-scan: node bin/muaddib.js scan .
@@ -129,7 +129,7 @@ The `coverage` CI job is blocking: `npm run test:coverage` runs c8 (locked devDe
 | Metric | Value |
 |--------|-------|
 | Version | **<!--stat:version-->2.12.2<!--/stat:version-->** |
-| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->169<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
+| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->170<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
 | Rules | **<!--stat:rulesTotal-->276<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> isolated** (Promise.allSettled, run in sequence) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **99 samples** in `tests/ground-truth/attacks.json` (npm + PyPI; 96 at the v2.11.48 measurement below). |

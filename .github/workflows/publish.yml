@@ -101,3 +101,31 @@ jobs:
           done
           echo "::error::muaddib-scanner@$VERSION is not served by the registry 15 min after publish"
           exit 1
+
+  # A release is done only when the version a user installs from npm DETECTS a known-malicious
+  # dependency from an empty HOME. 2.10.45 to 2.12.2 shipped with no IOC data reachable (first-run
+  # download 404): a flatmap-stream@0.1.1 dependency scored 0, and no check noticed.
+  product-smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install the published version like a user
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p "${RUNNER_TEMP}/inst"
+          cd "${RUNNER_TEMP}/inst"
+          npm init -y >/dev/null
+          npm install "muaddib-scanner@${VERSION}" --ignore-scripts --no-audit --no-fund
+      - name: Scan a known-malicious dependency with an empty HOME (must detect)
+        run: node scripts/product-smoke.js "${RUNNER_TEMP}/inst/node_modules/muaddib-scanner/bin/muaddib.js" --expect detect

@@ -1,0 +1,38 @@
+name: Product smoke (npm latest)
+
+# Daily: install the LATEST published muaddib-scanner from npm, exactly as a user would, and
+# scan a known-malicious dependency with an empty HOME. Catches what breaks between releases:
+# the ioc-db release missing, its signature or manifest broken, a database older than the
+# 30-day limit (every user scan would turn INCONCLUSIVE). Fails until a version with the
+# signed ioc-db bootstrap is published and the ioc-db release exists: that failure is real.
+
+on:
+  schedule:
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install muaddib-scanner@latest like a user
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/inst"
+          cd "${RUNNER_TEMP}/inst"
+          npm init -y >/dev/null
+          npm install muaddib-scanner@latest --ignore-scripts --no-audit --no-fund
+          node -p "'installed ' + require('./node_modules/muaddib-scanner/package.json').version"
+      - name: Scan a known-malicious dependency with an empty HOME (must detect)
+        run: node scripts/product-smoke.js "${RUNNER_TEMP}/inst/node_modules/muaddib-scanner/bin/muaddib.js" --expect detect
