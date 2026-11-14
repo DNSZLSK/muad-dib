@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> parallel scanners** (<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
+MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> isolated scanners** (run one after the other; a crash in one never stops the others) (<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
 
 ---
 
@@ -188,7 +188,7 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 
 ## Features
 
-### <!--stat:scanners-->22<!--/stat:scanners--> parallel scanners
+### <!--stat:scanners-->22<!--/stat:scanners--> isolated scanners
 
 | Scanner | Detection |
 |---------|-----------|
