@@ -157,9 +157,16 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
   const dateStr = getArchiveDateString();
   const dayDir = path.join(ARCHIVE_DIR, dateStr);
   const safeName = sanitizeForFilename(packageName);
-  const basename = `${safeName}-${version}`;
+  // The version comes from the registry like the name: sanitize it too instead of trusting the
+  // registry's own validation (semver forbids "/" on npm, but this archive also receives PyPI
+  // packages and any future feed), then refuse any path that would leave the day directory.
+  const basename = `${safeName}-${sanitizeForFilename(String(version))}`;
   const tgzPath = path.join(dayDir, `${basename}.tgz`);
   const jsonPath = path.join(dayDir, `${basename}.json`);
+  if (path.dirname(tgzPath) !== dayDir || path.dirname(jsonPath) !== dayDir) {
+    console.warn(`[Archive] Skip ${packageName}@${version}: unsafe archive file name`);
+    return false;
+  }
 
   // At/above the alert threshold: archive the full .tgz (existing behavior, unchanged).
   // Below it: keep only the cheap JSON metadata (audit trail + GT-promotion index).

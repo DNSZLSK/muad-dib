@@ -115,6 +115,34 @@ async function runTarballArchiveTests() {
     fs.rmSync(tmpArchive, { recursive: true, force: true });
   });
 
+  // The version string comes from the registry, like the name: a "../" in it must never move the
+  // archive file out of the day directory (zip-slip class, lint follow-up 2026-11-14). Child process
+  // because ARCHIVE_DIR is read from MUADDIB_ARCHIVE_DIR at module load; score below the tgz
+  // threshold so only the JSON sidecar is written (no download).
+  test('archiveSuspectTarball: a "../" version cannot write outside the day directory', () => {
+    const { spawnSync } = require('child_process');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-traversal-'));
+    const archive = path.join(root, 'archive');
+    fs.mkdirSync(archive);
+    const mod = JSON.stringify(path.join(__dirname, '..', '..', 'src', 'monitor', 'tarball-archive.js'));
+    const code = `const a=require(${mod});` +
+      "a.archiveSuspectTarball('evil-pkg','../../../escaped','https://registry.example/x.tgz',{score:5,rulesTriggered:['x']})" +
+      ".then(r=>{console.log(JSON.stringify({r,day:a.getArchiveDateString()}))});";
+    try {
+      const out = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, MUADDIB_ARCHIVE_DIR: archive } });
+      const { day } = JSON.parse(out.stdout.trim().split('\n').pop());
+      const listAll = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? listAll(path.join(d, e.name)) : [path.join(d, e.name)]);
+      const written = listAll(root);
+      assert(written.every(p => path.dirname(p) === path.join(archive, day)),
+        'every archive file must stay in the day directory: ' + JSON.stringify(written));
+      assert(written.length === 1, 'exactly one sidecar expected: ' + JSON.stringify(written));
+      assert(path.basename(written[0]).startsWith('evil-pkg-') && !path.basename(written[0]).includes('/'),
+        'the sidecar is written under a sanitized name: ' + path.basename(written[0]));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('archiveSuspectTarball: .json sha256 matches actual .tgz hash', () => {
     const tmpArchive = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-hash-'));
     const content = Buffer.from('real tarball bytes ' + Math.random());
