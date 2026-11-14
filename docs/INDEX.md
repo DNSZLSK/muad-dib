@@ -30,7 +30,7 @@
 |--------|-------|
 | Tests | **<!--stat:tests-->4545<!--/stat:tests-->** across <!--stat:testFiles-->167<!--/stat:testFiles--> files |
 | Rules | **<!--stat:rulesTotal-->274<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
-| Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
+| Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> isolated** (run in sequence) + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
 | TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |
 | TPR@20 (Ground Truth, v2.11.48 measure) | **88.30%** (83/94 in-scope) — **+3.1pp vs v2.11.47** via Track D `recon_exfil_direct_ip` compound (closes GT-095 gap, boosts GT-091/GT-092) |
 | FPR rules (Benign curated, v2.11.48 measure) | **1.10%** (6/545 scanned of 548) — **unchanged after Track D** (sameFile gate + public-IP-only filter prevent new FPs). Drop from 15.6% (v2.10.95) attributable to F1-F14 contextual caps. 6 remaining FPs are real: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid |
@@ -49,7 +49,7 @@ src/
 ├── pipeline/              # Pipeline stages: initializer, executor (22 scanners), processor, outputter
 ├── scoring.js             # Per-file max scoring + FP reductions + contextual FP caps (F1-F14)
 ├── intent-graph.js        # Intra-file source-sink coherence analysis
-├── scanner/               # 22 parallel scanners + 2 pre-analysis modules + python-ast bootstrap
+├── scanner/               # 22 isolated scanners + 2 pre-analysis modules + python-ast bootstrap
 │   ├── ast.js             # AST-based detection (acorn) — 98 rules
 │   ├── dataflow.js        # Credential read -> network send
 │   ├── module-graph/      # Cross-file taint propagation (pre-analysis)
