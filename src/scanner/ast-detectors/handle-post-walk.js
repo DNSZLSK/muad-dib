@@ -20,8 +20,13 @@
 'use strict';
 
 const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
+const { resolveMethodEvalCandidates } = require('./method-eval.js');
 
 function handlePostWalk(ctx) {
+  // First: every compound below reads hasEvalInFile / hasDynamicExec, which
+  // receiver.eval(...) calls only set once the whole file has been seen.
+  if (ctx.methodEval) resolveMethodEvalCandidates(ctx);
+
   // ── Anti-analysis / sandbox evasion (2026, @longzy DPRK "Contagious Interview") ──
   // We detect the EVASION rather than trying to hide the sandbox (an unwinnable arms race).
   //  (1) analyzer_honeytoken_reference (CRITICAL, FP~0): the file hides — behind charcode/base64/hex

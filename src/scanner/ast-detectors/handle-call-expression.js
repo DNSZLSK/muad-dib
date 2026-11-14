@@ -114,6 +114,7 @@ const {
 } = require('./helpers.js');
 const { countInvisibleUnicode } = require('../../shared/unicode-invisibles.js');
 const { classifyMcpWrite } = require('./mcp-write-classifier.js');
+const { isNonGlobalMethodEval, receiverText } = require('./method-eval.js');
 const { isShadowEnabled, recordShadowDivergence } = require('../../shared/shadow.js');
 const {
   carriesInjectedPayload,
@@ -1161,9 +1162,9 @@ function handleCallExpression(node, ctx) {
   }
 
   if (callName === 'eval') {
-    ctx.hasEvalInFile = true;
     // Detect staged eval decode
     if (node.arguments.length === 1 && hasDecodeArg(node.arguments[0])) {
+      ctx.hasEvalInFile = true;
       ctx.hasDynamicExec = true;
       ctx.threats.push({
         type: 'staged_eval_decode',
@@ -1179,26 +1180,29 @@ function handleCallExpression(node, ctx) {
         : 'Dangerous call "eval" with dynamic expression detected.';
 
       // Audit fix: even string-literal eval is dangerous if content contains dangerous APIs
+      let dangerousLiteral = false;
       if (isConstant && node.arguments[0]?.value) {
         const val = node.arguments[0].value;
         if (/\b(require|import|exec|execSync|spawn|child_process|\.readFile|\.writeFile|process\.env|\.homedir)\b/.test(val)) {
           severity = 'HIGH';
           message = `eval() with dangerous API in string literal: "${val.substring(0, 100)}"`;
-          ctx.hasDynamicExec = true;
+          dangerousLiteral = true;
         }
       }
 
-      // Only set hasDynamicExec for non-constant (dynamic) eval
-      if (!isConstant) {
-        ctx.hasDynamicExec = true;
+      const threat = { type: 'dangerous_call_eval', severity, message, file: ctx.relFile };
+      // Only set hasDynamicExec for non-constant (dynamic) eval or a dangerous literal
+      const dynamic = !isConstant || dangerousLiteral;
+      if (ctx.methodEval && isNonGlobalMethodEval(node, ctx)) {
+        // client.eval(script, ...): kept or downgraded after the walk (method-eval.js),
+        // hasEvalInFile / hasDynamicExec are applied there for kept calls only.
+        ctx.methodEval.candidates.push({ threat, dynamic, receiver: receiverText(node.callee) });
+      } else {
+        ctx.hasEvalInFile = true;
+        if (dynamic) ctx.hasDynamicExec = true;
       }
 
-      ctx.threats.push({
-        type: 'dangerous_call_eval',
-        severity,
-        message,
-        file: ctx.relFile
-      });
+      ctx.threats.push(threat);
     }
   } else if (callName === 'Function') {
     ctx.hasDynamicExec = true;

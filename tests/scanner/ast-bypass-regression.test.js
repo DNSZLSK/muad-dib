@@ -404,6 +404,74 @@ Reflect.apply(Function.prototype.apply, eval, [null, ['process.env.SECRET']]);
       assert(detected, 'Reflect.apply(*.apply, eval) should be detected');
     } finally { cleanupTemp(tmp); }
   });
+
+  // receiver.eval(...) on a non-global object (Redis/Lua scripting API) is LOW and stays
+  // out of intent coherence; every way of putting the global eval behind a receiver is HIGH.
+  const evalSeverities = result => (result.threats || [])
+    .filter(t => t.type === 'dangerous_call_eval').map(t => t.severity);
+
+  const redisLike = [
+    ['client.eval(script, keys...)', 'async function take(client, k) { return client.eval(SCRIPT, 1, k); }'],
+    ['this.client.eval(script, keys...)', 'class Pool { async take(k) { return this.client.eval(SCRIPT, 1, k); } }'],
+    ['client?.eval(script) next to typeof window', "if (typeof window !== 'undefined') {}\nasync function take(client, k) { return client?.eval(SCRIPT, 1, k); }"]
+  ];
+  for (const [label, code] of redisLike) {
+    await asyncTest(`METHOD-EVAL: ${label} on a non-global object - LOW`, async () => {
+      const tmp = makeTempPkg(code);
+      try {
+        const sev = evalSeverities(await runScanDirect(tmp));
+        assert(sev.length === 1 && sev[0] === 'LOW', `expected one LOW dangerous_call_eval, got ${JSON.stringify(sev)}`);
+      } finally { cleanupTemp(tmp); }
+    });
+  }
+
+  await asyncTest('METHOD-EVAL: client.eval next to a credential read - no intent_credential_exfil', async () => {
+    const tmp = makeTempPkg(`
+const key = process.env.GOOGLE_API_KEY;
+async function take(client, k) { return client.eval(SCRIPT, 2, k, key); }
+module.exports = { take };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!hasType(result, 'intent_credential_exfil'), 'a Redis script call is not an exec sink');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  const evasions = [
+    ['globalThis.eval(c)', 'function f(c) { return globalThis.eval(c); }'],
+    ['window.top.eval(c)', 'function f(c) { return window.top.eval(c); }'],
+    ['this.eval(c)', 'function f(c) { return this.eval(c); }'],
+    ['alias of globalThis', 'const g = globalThis;\nfunction f(c) { return g.eval(c); }'],
+    ['shorthand {eval}', 'const o = {eval};\nfunction f(c) { return o.eval(c); }'],
+    ['o.eval = eval', 'const o = {};\no.eval = eval;\nfunction f(c) { return o.eval(c); }'],
+    ['eval read from a global member', 'const o = { run: globalThis.eval };\no.eval = o.run;\nfunction f(c) { return o.eval(c); }'],
+    ['global object passed as an argument', 'function run(g, c) { return g.eval(c); }\nrun(globalThis, x);'],
+    ['spread of window', 'const o = {...window};\nfunction f(c) { return o.eval(c); }'],
+    ["Reflect.get(globalThis, 'eval')", "const o = {};\no.eval = Reflect.get(globalThis, 'eval');\no.eval(x);"],
+    ["Function('return this')().eval", "Function('return this')().eval(x);"]
+  ];
+  for (const [label, code] of evasions) {
+    await asyncTest(`METHOD-EVAL bypass: ${label} - stays HIGH`, async () => {
+      const tmp = makeTempPkg(code);
+      try {
+        const sev = evalSeverities(await runScanDirect(tmp));
+        assert(sev.length > 0 && sev.every(s => s === 'HIGH'), `expected HIGH dangerous_call_eval, got ${JSON.stringify(sev)}`);
+      } finally { cleanupTemp(tmp); }
+    });
+  }
+
+  await asyncTest('METHOD-EVAL bypass: {eval} receiver next to a credential read - intent_credential_exfil kept', async () => {
+    const tmp = makeTempPkg(`
+const key = process.env.GOOGLE_API_KEY;
+const o = {eval};
+function f(c) { return o.eval(c + key); }
+module.exports = { f };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      assert(hasType(result, 'intent_credential_exfil'), 'the disguised global eval must still pair with the credential read');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstBypassRegressionTests };

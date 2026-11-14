@@ -19,7 +19,7 @@
 
 const path = require('path');
 const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
-const { countInvisibleUnicode } = require('../shared/unicode-invisibles.js');
+const { countInvisibleUnicode, countInvisibleUnicodeOutsideCharsetTables } = require('../shared/unicode-invisibles.js');
 
 // node_modules NOT excluded: detect obfuscated code in dependencies.
 // dist/build/out/output excluded: bundled output is always flagged as isPackageOutput (LOW)
@@ -143,7 +143,10 @@ function detectObfuscation(targetPath) {
 
     // 7. Unicode invisible character injection (GlassWorm — mars 2026)
     // Detects zero-width chars, variation selectors, tag characters embedded in source
-    const invisibleCount = countInvisibleUnicode(content);
+    // Charset decoding tables (iconv-lite sbcs data) map LRM/RLM/ZWNJ/ZWJ/ZWSP/BOM to real
+    // codepage slots; those occurrences are not counted (see unicode-invisibles.js).
+    let invisibleCount = countInvisibleUnicode(content);
+    if (invisibleCount >= 10) invisibleCount = countInvisibleUnicodeOutsideCharsetTables(content);
     if (invisibleCount >= 10) {
       threats.push({
         type: 'unicode_invisible_injection',

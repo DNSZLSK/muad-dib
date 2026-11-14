@@ -200,6 +200,75 @@ async function runObfuscationTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // Charset decoding tables (iconv-lite sbcs-data-generated.js): codepages map LRM/RLM/ZWNJ/ZWJ/
+  // ZWSP/BOM to real slots. A table string is 128-256 codepoints, >= 90 % distinct, each of
+  // those invisibles at most once. Built here from distinct Cyrillic letters + the invisibles.
+  const charsetTable = (invisibles, size = 128, fill = i => String.fromCodePoint(0x0400 + i)) => {
+    const chars = [];
+    for (let i = 0; chars.length < size - invisibles.length; i++) chars.push(fill(i));
+    chars.splice(60, 0, ...invisibles);
+    return chars.join('');
+  };
+  const sbcsModule = tables => 'module.exports = {\n' +
+    tables.map((t, i) => `  "cp${i}": { "type": "_sbcs", "chars": "${t}" },`).join('\n') + '\n};\n';
+
+  await asyncTest('OBFUSCATION: NO unicode_invisible_injection for iconv-lite style charset tables', async () => {
+    // Same shape as the vendored iconv-lite table that scored 81: windows-1255 (LRM RLM),
+    // windows-1256 (ZWNJ ZWJ LRM RLM), iso-8859-8 (LRM RLM, unmapped U+FFFD slots), macthai (BOM ZWSP).
+    const iso88598 = charsetTable(['‎', '‏'], 128, i => (i % 4 === 0 ? '�' : String.fromCodePoint(0x05D0 + i)));
+    const code = sbcsModule([
+      charsetTable(['‎', '‏']),
+      charsetTable(['‌', '‍', '‎', '‏'], 256),
+      iso88598,
+      charsetTable(['﻿', '​'])
+    ]);
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
+      assert(!t, `charset tables (10 table invisibles) must not trigger, got ${t && t.message}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass attempts: an attacker cannot hide an invisible payload inside a table-shaped string.
+  const tableBypasses = [
+    ['variation selectors in a table', [charsetTable(['︁', '︂', '︃', '︄', '︅', '︆']),
+      charsetTable(['︇', '︈', '︉', '︊'])]],
+    ['supplementary variation selectors in a table', [charsetTable(Array.from({ length: 10 }, (_, i) => String.fromCodePoint(0xE0100 + i)))]],
+    ['tag characters in a table', [charsetTable(Array.from({ length: 10 }, (_, i) => String.fromCodePoint(0xE0041 + i)))]],
+    ['bidi overrides in a table', [charsetTable(['‪', '‫', '‬', '‭', '‮']),
+      charsetTable(['‪', '‫', '‬', '‭', '‮'])]],
+    ['zero-width binary run inside a table', [charsetTable(['​', '‌', '​', '‌', '​', '‌', '​', '‌', '​', '‌'])]],
+    ['table too short (127 codepoints)', [charsetTable(['‌', '‍', '‎', '‏', '​'], 127),
+      charsetTable(['‌', '‍', '‎', '‏', '​'], 127)]],
+    ['table not distinct (repeated letters)', [charsetTable(['‌', '‍', '‎', '‏', '​'], 128, i => 'abcdefgh'[i % 8]),
+      charsetTable(['‌', '‍', '‎', '‏', '​'], 128, i => 'abcdefgh'[i % 8])]]
+  ];
+  for (const [label, tables] of tableBypasses) {
+    await asyncTest(`OBFUSCATION bypass: ${label} - unicode_invisible_injection CRITICAL`, async () => {
+      const tmp = makeTempPkg(sbcsModule(tables) + 'eval(decode(module.exports));\n');
+      try {
+        const result = await runScanDirect(tmp);
+        const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
+        assert(t, `${label}: must still trigger`);
+        assert(t.severity === 'CRITICAL', `${label}: expected CRITICAL, got ${t.severity}`);
+      } finally { cleanupTemp(tmp); }
+    });
+  }
+
+  await asyncTest('OBFUSCATION bypass: table invisibles plus a payload run outside tables - counts the run', async () => {
+    // 4 exempt table invisibles + 10 zero-width chars outside any table -> 10 counted.
+    const code = sbcsModule([charsetTable(['‌', '‍', '‎', '‏'])]) +
+      `var p = "x${'​‌'.repeat(5)}y";\n`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
+      assert(t && t.severity === 'CRITICAL', 'the run outside the table must still trigger CRITICAL');
+      assert(/^10 invisible/.test(t.message), `expected 10 counted, got: ${t.message}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('OBFUSCATION: NO detection for textual unicode escapes', async () => {
     // \\u200B in source code as text (not actual invisible char) should NOT trigger
     const code = `var x = "\\u200B\\u200C\\u200D"; console.log(x);`;

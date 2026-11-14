@@ -8,7 +8,7 @@
   "compound": 21,
   "astRules": 98,
   "scannerFiles": 36,
-  "astDetectors": 15,
+  "astDetectors": 16,
   "moduleGraph": 9,
   "pythonAstDetectors": 7,
   "testFiles": 170,

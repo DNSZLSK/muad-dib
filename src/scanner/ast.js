@@ -35,6 +35,7 @@ const {
 } = require('./ast-detectors');
 const { detectAnalyzerHoneytoken, detectEnvMarkerEnumeration, countExitGuards, hasHostRecon } = require('./ast-detectors/anti-evasion.js');
 const { SAFE_FETCH_DOMAINS } = require('./ast-detectors/constants.js');
+const methodEval = require('./ast-detectors/method-eval.js');
 
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
@@ -186,6 +187,7 @@ function analyzeFile(content, filePath, basePath) {
       return names;
     })(),
     evalAliases: new Map(),           // B1: variable name → 'eval'|'Function'
+    methodEval: methodEval.newMethodEvalState(), // receiver.eval(...) on non-global objects (method-eval.js)
     envAliases: new Set(),            // AST-018 alias fix: names bound to process.env (`var env = process.env`)
     moduleLoadDirectAliases: new Set(), // B3: destructured _load from require('module')
     objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>
@@ -377,7 +379,7 @@ function analyzeFile(content, filePath, basePath) {
     ctx.fetchUrls = urlMatches.slice(0, 32);
   }
 
-  walk.simple(ast, {
+  const visitors = {
     VariableDeclarator(node) { handleVariableDeclarator(node, ctx); },
     CallExpression(node) { handleCallExpression(node, ctx); },
     ImportExpression(node) { handleImportExpression(node, ctx); },
@@ -386,7 +388,19 @@ function analyzeFile(content, filePath, basePath) {
     AssignmentExpression(node) { handleAssignmentExpression(node, ctx); },
     MemberExpression(node) { handleMemberExpression(node, ctx); },
     WithStatement(node) { handleWithStatement(node, ctx); }
-  });
+  };
+  // receiver.eval(...) candidates need file-wide reference counts (method-eval.js). Without
+  // the text ".eval" no candidate can exist, so the per-node counting is skipped entirely.
+  if (/\.\s*eval\b/.test(content)) {
+    visitors.CallExpression = node => { methodEval.noteCall(node, ctx); handleCallExpression(node, ctx); };
+    visitors.Literal = node => { methodEval.noteLiteral(node, ctx); handleLiteral(node, ctx); };
+    visitors.MemberExpression = node => { methodEval.noteMember(node, ctx); handleMemberExpression(node, ctx); };
+    visitors.Identifier = node => methodEval.noteIdentifier(node, ctx);
+    visitors.UnaryExpression = node => methodEval.noteUnary(node, ctx);
+  } else {
+    ctx.methodEval = null;
+  }
+  walk.simple(ast, visitors);
 
   // FIX 5: DNS chunk exfiltration — verify dns.resolve* is inside a loop body
   if (ctx.hasDnsRequire && ctx.hasBase64Encode && !ctx.hasDnsLoop) {
