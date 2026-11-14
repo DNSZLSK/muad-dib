@@ -403,6 +403,9 @@ async function benchmarkSize(sizeKey, iterations) {
 
   // Average results across iterations
   const avg = averageRuns(runs);
+  // True peak of the process so far (resourceUsage().maxRSS is in KB): memAfter.rss is only a
+  // sample taken after the scan and misses the high-water mark a memory budget has to bound.
+  avg.peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024 * 10) / 10;
 
   // Print results
   printResults(avg, size);
@@ -476,8 +479,9 @@ function printResults(data, size) {
 
   // Memory
   console.log(`\n  Memory:`);
-  console.log(`    Peak RSS:        ${data.memAfter.rss} MB`);
-  console.log(`    Peak heap used:  ${data.memAfter.heapUsed} MB`);
+  console.log(`    Peak RSS:        ${data.peakRssMb} MB (process high-water mark)`);
+  console.log(`    RSS after scan:  ${data.memAfter.rss} MB`);
+  console.log(`    Heap after scan: ${data.memAfter.heapUsed} MB`);
   console.log(`    Delta RSS:       ${data.memDelta.rss > 0 ? '+' : ''}${data.memDelta.rss} MB`);
   console.log(`    Delta heap:      ${data.memDelta.heapUsed > 0 ? '+' : ''}${data.memDelta.heapUsed} MB`);
 
@@ -678,18 +682,71 @@ async function main() {
     iterations = parseInt(args[iterIdx + 1], 10) || 1;
   }
 
+  // --result-file <path> (internal, used by --budget): write the single --size result as JSON.
+  const resultIdx = args.indexOf('--result-file');
+  const resultFile = resultIdx !== -1 ? args[resultIdx + 1] : null;
+
+  // --budget <file.json>: { "<size>": { "e2eMs": N, "rssMb": N }, ... }. Runs only the listed
+  // sizes and exits 1 when a measured value exceeds its ceiling, so a performance or memory
+  // regression fails CI instead of being printed and forgotten. Each size runs in its OWN
+  // process: process.resourceUsage().maxRSS is the high-water mark since process start, so
+  // sizes measured one after the other in one process would all report the same cumulative peak.
+  let budgets = null;
+  const budgetIdx = args.indexOf('--budget');
+  if (budgetIdx !== -1) {
+    const file = args[budgetIdx + 1];
+    if (!file || !fs.existsSync(file)) {
+      console.error(`--budget needs an existing JSON file, got: ${file}`);
+      process.exit(2);
+    }
+    budgets = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const s of Object.keys(budgets)) {
+      if (!SIZES[s]) { console.error(`Unknown size in budget file: ${s}`); process.exit(2); }
+    }
+  }
+
   console.log(`\nMUAD'DIB Performance Benchmark`);
   console.log(`Node ${process.version} | ${os.platform()} ${os.arch()} | ${os.cpus()[0].model}`);
   console.log(`${os.cpus().length} cores | ${Math.round(os.totalmem() / 1024 / 1024 / 1024)} GB RAM`);
   if (iterations > 1) console.log(`Averaging over ${iterations} iterations`);
 
-  // Pre-warm IOC cache (loading iocs-compact.json takes ~3s on first call)
-  const iocWarmupMs = warmupIOCs();
-  console.log(`IOC cache warmed in ${iocWarmupMs.toFixed(0)}ms`);
+  // Pre-warm IOC cache (loading iocs-compact.json takes ~3s on first call). The budget parent
+  // only spawns one child per size, so it skips the warmup.
+  const allResults = {};
+  if (!budgets) {
+    const iocWarmupMs = warmupIOCs();
+    console.log(`IOC cache warmed in ${iocWarmupMs.toFixed(0)}ms`);
+    allResults.iocWarmupMs = Math.round(iocWarmupMs);
+    // Peak after the IOC load alone: the part of every size's peak that is not the scan.
+    allResults.baselineRssMb = Math.round(process.resourceUsage().maxRSS / 1024 * 10) / 10;
+    console.log(`Peak RSS after IOC load: ${allResults.baselineRssMb} MB`);
+  }
 
-  const allResults = { iocWarmupMs: Math.round(iocWarmupMs) };
-
-  if (compareMode) {
+  if (budgets) {
+    const { spawnSync } = require('child_process');
+    allResults.sizes = [];
+    const over = [];
+    for (const s of Object.keys(budgets)) {
+      const tmp = path.join(os.tmpdir(), `muaddib-bench-result-${s}-${process.pid}.json`);
+      const child = spawnSync(process.execPath,
+        [...process.execArgv, __filename, '--size', s, '--iterations', String(iterations), '--result-file', tmp],
+        { stdio: 'inherit' });
+      if (child.status !== 0 || !fs.existsSync(tmp)) {
+        over.push(`${s}: benchmark process failed (exit ${child.status}${child.signal ? ', ' + child.signal : ''})`);
+        continue;
+      }
+      const r = JSON.parse(fs.readFileSync(tmp, 'utf8'));
+      fs.rmSync(tmp, { force: true });
+      allResults.sizes.push(r);
+      console.log(`  [budget] ${s}: e2e ${r.e2eMs.toFixed(0)} ms, peak RSS ${r.peakRssMb} MB (after IOC load alone: ${r.baselineRssMb} MB)`);
+      const b = budgets[s];
+      if (b.e2eMs && r.e2eMs > b.e2eMs) over.push(`${s}: e2e ${r.e2eMs.toFixed(0)} ms > budget ${b.e2eMs} ms`);
+      if (b.rssMb && r.peakRssMb > b.rssMb) over.push(`${s}: peak RSS ${r.peakRssMb} MB > budget ${b.rssMb} MB`);
+    }
+    console.log(`\n  BUDGET: ${over.length ? 'EXCEEDED' : 'within limits'}`);
+    for (const o of over) console.log(`    - ${o}`);
+    if (over.length) process.exitCode = 1;
+  } else if (compareMode) {
     allResults.comparisons = await benchmarkComparisons();
   } else if (scalingMode) {
     allResults.scaling = await benchmarkScaling();
@@ -708,12 +765,17 @@ async function main() {
     }
   }
 
+  if (resultFile && allResults.sizes && allResults.sizes.length === 1) {
+    fs.writeFileSync(resultFile, JSON.stringify({ ...allResults.sizes[0], iocWarmupMs: allResults.iocWarmupMs, baselineRssMb: allResults.baselineRssMb }));
+    return;
+  }
+
   // Summary
   if (allResults.sizes && allResults.sizes.length > 1) {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`  SUMMARY`);
     console.log(`${'='.repeat(60)}`);
-    console.log(`  ${'Size'.padEnd(22)} ${'E2E (ms)'.padStart(10)} ${'files/sec'.padStart(10)} ${'RSS (MB)'.padStart(10)} ${'Bottleneck'.padStart(18)}`);
+    console.log(`  ${'Size'.padEnd(22)} ${'E2E (ms)'.padStart(10)} ${'files/sec'.padStart(10)} ${'Peak RSS'.padStart(10)} ${'Bottleneck'.padStart(18)}`);
     console.log(`  ${'-'.repeat(22)} ${'-'.repeat(10)} ${'-'.repeat(10)} ${'-'.repeat(10)} ${'-'.repeat(18)}`);
 
     for (const r of allResults.sizes) {
@@ -722,7 +784,7 @@ async function main() {
       const entries = Object.entries(r.scanners).sort((a, b) => b[1].ms - a[1].ms);
       const bottleneck = entries[0][0];
       console.log(
-        `  ${sizeInfo.label.padEnd(22)} ${r.e2eMs.toFixed(0).padStart(10)} ${fps.toFixed(0).padStart(10)} ${r.memAfter.rss.toFixed(1).padStart(10)} ${bottleneck.padStart(18)}`
+        `  ${sizeInfo.label.padEnd(22)} ${r.e2eMs.toFixed(0).padStart(10)} ${fps.toFixed(0).padStart(10)} ${r.peakRssMb.toFixed(1).padStart(10)} ${bottleneck.padStart(18)}`
       );
     }
   }
