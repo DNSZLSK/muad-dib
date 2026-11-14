@@ -505,7 +505,7 @@ Every scan result carries `analysis.status` (and `summary.analysisStatus`). It i
 
 MUAD'DIB 2.9 uses a **triple detection approach**:
 
-1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV (incl. GHSA malware, mirrored as OSV MAL- entries), DataDog, OSSF, Aikido OSS Malware Feed, OpenSourceMalware.com (community-verified), and GenSecAI Shai-Hulud Detector. Fast and reliable for known threats. On the VPS, these feeds are refreshed automatically via two systemd timers: `muaddib-scrape-light.timer` (every 15 min, JSON/REST feeds incl. OSM) and `muaddib-scrape.timer` (every 6 h, bulk zip dumps).
+1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV (incl. GHSA malware, mirrored as OSV MAL- entries), DataDog, OSSF, Aikido OSS Malware Feed, and GenSecAI Shai-Hulud Detector. Fast and reliable for known threats. On the VPS, these feeds are refreshed automatically via two systemd timers: `muaddib-scrape-light.timer` (every 15 min, JSON/REST feeds) and `muaddib-scrape.timer` (every 6 h, bulk zip dumps).
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
