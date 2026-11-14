@@ -62,7 +62,20 @@ jobs:
       - name: Self-scan node_modules (forensic record, non-blocking)
         env:
           REF_NAME: ${{ github.ref_name }}
-        run: node bin/muaddib.js scan node_modules --json > "self-scan-${REF_NAME}.json" || true
+        # Written outside the package root: up to 2.12.0 this file was published inside the tarball.
+        run: node bin/muaddib.js scan node_modules --json > "${RUNNER_TEMP}/self-scan-${REF_NAME}.json" || true
+      - name: Verify package contents (allowlist)
+        # The published tarball may only hold runtime files. 2.12.0 also shipped audit-data/
+        # (2.2 MB of review verdicts), the job's own self-scan, .githooks/, zizmor.yml, stats.json.
+        run: |
+          npm pack --dry-run --json --ignore-scripts > "${RUNNER_TEMP}/pack.json"
+          node -e '
+            const files = require(process.argv[1])[0].files.map(f => f.path);
+            const ok = /^(bin\/|src\/|LICENSE$|NOTICE$|README\.md$|package\.json$)/;
+            const bad = files.filter(p => !ok.test(p));
+            if (bad.length) { console.error("::error::unexpected files in the npm tarball: " + bad.join(", ")); process.exit(1); }
+            console.log(files.length + " files, all within the allowlist");
+          ' "${RUNNER_TEMP}/pack.json"
       - name: Verify npm supports trusted publishing (>= 11.5.1)
         run: |
           V=$(npm --version)
