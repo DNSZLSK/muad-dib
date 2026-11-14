@@ -217,42 +217,42 @@ async function runIocDbTests() {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  // --- OSM data is local-only: never in the published compact (terms of use 2026-09-25) ---
-  test('IOC-DB: generateCompactIOCs drops entries whose only source is OSM, keeps shared and legacy ones', () => {
+  // --- local-only sources never reach the published compact ---
+  test('IOC-DB: generateCompactIOCs drops entries whose only sources are local-only, keeps shared and legacy ones', () => {
     const { generateCompactIOCs, isLocalOnlyIOC } = require('../../src/ioc/updater.js');
     const full = {
       updated: new Date().toISOString(),
       sources: ['osv-malicious', 'osm'],
       packages: [
-        { name: 'osm-only-wild', version: '*', severity: 'critical', source: 'osm', sources: [{ name: 'osm' }] },
-        { name: 'osm-only-ver', version: '1.2.3', severity: 'high', sources: [{ name: 'osm' }] },
-        { name: 'osm-legacy-field', version: '*', source: 'osm' },
-        { name: 'osm-and-osv', version: '*', sources: [{ name: 'osm' }, { name: 'osv-malicious' }] },
+        { name: 'local-only-wild', version: '*', severity: 'critical', source: 'osm', sources: [{ name: 'osm' }] },
+        { name: 'local-only-ver', version: '1.2.3', severity: 'high', sources: [{ name: 'osm' }] },
+        { name: 'local-only-legacy-field', version: '*', source: 'osm' },
+        { name: 'local-and-osv', version: '*', sources: [{ name: 'osm' }, { name: 'osv-malicious' }] },
         { name: 'aikido-only', version: '2.0.0', sources: [{ name: 'aikido' }] },
         { name: 'no-source-legacy', version: '*' }
       ],
       pypi_packages: [
-        { name: 'py-osm-only', version: '0.1', sources: [{ name: 'osm' }] },
+        { name: 'py-local-only', version: '0.1', sources: [{ name: 'osm' }] },
         { name: 'py-shared', version: '*', sources: [{ name: 'osm' }, { name: 'osv-malicious-pypi' }] }
       ]
     };
     const c = generateCompactIOCs(full);
     const npmNames = new Set([...c.wildcards, ...Object.keys(c.versioned)]);
-    for (const n of ['osm-only-wild', 'osm-only-ver', 'osm-legacy-field']) assert(!npmNames.has(n), n + ' must not be published');
-    for (const n of ['osm-and-osv', 'aikido-only', 'no-source-legacy']) assert(npmNames.has(n), n + ' must be kept');
-    assert(!c.severityOverrides || !c.severityOverrides['osm-only-ver'], 'no severity override leaks the OSM entry');
-    assert(!(c.pypi_versioned['py-osm-only']) && c.pypi_wildcards.includes('py-shared'), 'PyPI: OSM-only dropped, shared kept');
-    assert(!c.sources.includes('osm'), 'the published source list never names OSM: ' + c.sources);
+    for (const n of ['local-only-wild', 'local-only-ver', 'local-only-legacy-field']) assert(!npmNames.has(n), n + ' must not be published');
+    for (const n of ['local-and-osv', 'aikido-only', 'no-source-legacy']) assert(npmNames.has(n), n + ' must be kept');
+    assert(!c.severityOverrides || !c.severityOverrides['local-only-ver'], 'no severity override leaks the local-only entry');
+    assert(!(c.pypi_versioned['py-local-only']) && c.pypi_wildcards.includes('py-shared'), 'PyPI: local-only dropped, shared kept');
+    assert(!c.sources.includes('osm'), 'the published source list never names a local-only source: ' + c.sources);
     assert(isLocalOnlyIOC({ sources: [{ name: 'osm' }] }) && !isLocalOnlyIOC({}) && !isLocalOnlyIOC({ sources: ['osm', 'aikido'] }), 'isLocalOnlyIOC contract');
   });
 
-  test('IOC-DB: scripts/ioc-db.js build refuses a compact file that declares OSM as a source', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-iocdb-osm-'));
+  test('IOC-DB: scripts/ioc-db.js build refuses a compact file that declares a local-only source', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-iocdb-localonly-'));
     try {
       const p = path.join(dir, 'c.json');
       fs.writeFileSync(p, JSON.stringify(Object.assign(compactWith(N), { sources: ['osv-malicious', 'osm'] })));
       const r = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ioc-db.js'), 'build', p, path.join(dir, 'out')], { encoding: 'utf8' });
-      assert(r.status !== 0 && /OSM/.test(r.stderr), 'must refuse: ' + r.stderr);
+      assert(r.status !== 0 && /local-only/.test(r.stderr), 'must refuse: ' + r.stderr);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 

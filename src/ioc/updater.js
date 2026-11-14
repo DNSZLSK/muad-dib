@@ -604,11 +604,9 @@ function writeLeanIOCFile(fullIOCs) {
   }
 }
 
-// OpenSourceMalware (OSM) data may be consulted locally but never redistributed: their terms of
-// use (2026-09-25) require a license for "Sharing or selling our data, or a dataset built from it"
-// and for building it into a product. The compact file is what gets published (git, the ioc-db
-// release), so an entry whose ONLY source is OSM never enters it. An entry also reported by
-// another feed (OSV, Aikido, ...) is kept: it is published on the strength of that feed.
+// Feeds licensed for local use only: their entries stay in the full local database and never
+// enter the compact file, which is what gets published (git, the ioc-db release). An entry also
+// reported by a redistributable feed is kept: it is published on the strength of that feed.
 const LOCAL_ONLY_SOURCES = new Set(['osm']);
 
 function _sourceNames(p) {
@@ -622,7 +620,7 @@ function _sourceNames(p) {
 }
 
 /**
- * True when every source of the entry is local-only (OSM): such an entry must not be published.
+ * True when every source of the entry is local-only: such an entry must not be published.
  * An entry with no source information is legacy data from the other feeds and is kept.
  * @param {Object} p
  * @returns {boolean}

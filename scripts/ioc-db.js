@@ -36,7 +36,7 @@ function build(compactPath, outDir) {
   let declared = [];
   try { declared = JSON.parse(fs.readFileSync(compactPath, 'utf8')).sources || []; } catch { /* checked above */ }
   if (Array.isArray(declared) && declared.includes('osm')) {
-    fail('compact database declares OSM as a source: OSM data is local-only and must never be published');
+    fail('compact database declares a local-only source: refusing to publish');
   }
   const n = countCompactPackages(compactPath);
   if (n < MIN_COMPACT_PACKAGES) fail(`compact database has ${n} npm entries, below ${MIN_COMPACT_PACKAGES}: refusing to publish`);
