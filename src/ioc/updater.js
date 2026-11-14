@@ -34,6 +34,9 @@ const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
 // very peak we are removing). See ensureLeanIOCFile + createLeanIOCs below.
 const LOCAL_LEAN_FILE = path.join(__dirname, 'data/iocs-lean.json');
 const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
+// Compact database downloaded by bootstrap.js from the ioc-db release: the only IOC source of
+// an npm install that never ran `muaddib update` (the npm package ships no IOC data).
+const HOME_COMPACT_FILE = path.join(HOME_DATA_PATH, 'iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
 async function updateIOCs() {
@@ -267,7 +270,7 @@ function mergeIOCs(target, source) {
 // scan/poll) does zero disk I/O.
 const IOCS_DIR = path.join(__dirname, '..', '..', 'iocs');
 const IOC_SOURCE_FILES = [
-  CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_LEAN_FILE, LOCAL_COMPACT_FILE,
+  CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_LEAN_FILE, LOCAL_COMPACT_FILE, HOME_COMPACT_FILE,
   path.join(IOCS_DIR, 'packages.yaml'), path.join(IOCS_DIR, 'builtin.yaml'),
   path.join(IOCS_DIR, 'hashes.yaml'), path.join(IOCS_DIR, 'string-iocs.yaml')
 ];
@@ -339,6 +342,15 @@ function loadCachedIOCs() {
       mergeIOCs(merged, expandedIOCs);
     } catch (e) {
       console.log('[WARN] Failed to load compact IOC database: ' + e.message);
+    }
+  }
+
+  // Priority 2c: compact database downloaded from the ioc-db release (npm installs).
+  if (fs.existsSync(HOME_COMPACT_FILE)) {
+    try {
+      mergeIOCs(merged, expandCompactIOCs(JSON.parse(fs.readFileSync(HOME_COMPACT_FILE, 'utf8'))));
+    } catch (e) {
+      console.log('[WARN] Failed to load downloaded IOC database: ' + e.message);
     }
   }
 
@@ -746,7 +758,7 @@ function invalidateCache() {
  * @returns {string|null} Warning message or null
  */
 function checkIOCStaleness(maxAgeDays = 30) {
-  const filesToCheck = [CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_COMPACT_FILE];
+  const filesToCheck = [CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_COMPACT_FILE, HOME_COMPACT_FILE];
   let newestMtime = 0;
 
   for (const f of filesToCheck) {

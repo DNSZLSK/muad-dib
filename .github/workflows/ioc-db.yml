@@ -1,0 +1,98 @@
+name: IOC database
+
+# Rebuilds the IOC database that npm installs download at first run (src/ioc/bootstrap.js):
+# the npm package ships no IOC data. The release `ioc-db` is a rolling prerelease, never
+# "latest", independent of version releases. Each run publishes a content-addressed asset
+# (iocs-compact-<sha12>.json.gz) and an Ed25519-signed manifest; clients refuse anything the
+# signed manifest does not describe (src/ioc/ioc-db-signature.js).
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/ioc-db.yml'
+      - 'scripts/ioc-db.js'
+      - 'src/ioc/**'
+
+permissions: {}
+
+concurrency:
+  group: ioc-db
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci
+      # Full scrape (OSV, OSSF, GHSA, GenSecAI, DataDog, ...) that rewrites src/ioc/data/iocs-compact.json.
+      # Not `muaddib update`: that fast mode only adds a few small feeds to ~/.muaddib/data and leaves
+      # the compact file as committed, so the asset would be the git copy, possibly months old.
+      - name: Scrape the IOC feeds (seeded from the git-tracked compact database)
+        run: node bin/muaddib.js scrape
+      - name: Build the asset and its unsigned manifest
+        run: node scripts/ioc-db.js build src/ioc/data/iocs-compact.json "${RUNNER_TEMP}/ioc-db"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ioc-db
+          path: ${{ runner.temp }}/ioc-db/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The signing key exists only in this environment (master branch only).
+    environment: ioc-db
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ioc-db
+          path: ${{ runner.temp }}/ioc-db
+      - name: Sign the manifest
+        env:
+          IOC_DB_SIGNING_KEY: ${{ secrets.IOC_DB_SIGNING_KEY }}
+        run: node scripts/ioc-db.js sign "${RUNNER_TEMP}/ioc-db"
+      - name: Verify with the public key shipped to users
+        run: node scripts/ioc-db.js verify "${RUNNER_TEMP}/ioc-db"
+      - name: Publish (asset first, then manifest and signature, then prune old assets)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DIR="${RUNNER_TEMP}/ioc-db"
+          ASSET=$(node -p "require(process.argv[1]).asset" "$DIR/ioc-db.manifest.json")
+          if ! gh release view ioc-db >/dev/null 2>&1; then
+            gh release create ioc-db --prerelease --latest=false --title "IOC database (rolling)" \
+              --notes "Rolling IOC database for muaddib-scanner, rebuilt daily by .github/workflows/ioc-db.yml. Verified by clients against the signed manifest."
+          fi
+          gh release upload ioc-db "$DIR/$ASSET" --clobber
+          gh release upload ioc-db "$DIR/ioc-db.manifest.json" "$DIR/ioc-db.manifest.sig" --clobber
+          for old in $(gh release view ioc-db --json assets -q '.assets[].name' | grep -E '^iocs-compact-[0-9a-f]{12}\.json\.gz$' | grep -vx "$ASSET"); do
+            gh release delete-asset ioc-db "$old" --yes
+          done

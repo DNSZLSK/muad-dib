@@ -988,10 +988,11 @@ async function runScraper() {
     }
   }
 
-  // Fresh-install fallback: the full iocs.json is gitignored / not shipped in the
-  // npm package, but the compact baseline IS. Seed from it (the same path that
-  // `muaddib update` uses) so a first scrape augments the shipped baseline instead
-  // of appearing to start from zero and re-downloading everything.
+  // Source-checkout fallback: seed from the git-tracked compact baseline so a first scrape
+  // augments it instead of starting from zero. NOT available in an npm install: the npm package
+  // ships no IOC data at all (.npmignore). There the first scrape starts from the database
+  // downloaded from the ioc-db release, if any (~/.muaddib/data/iocs-compact.json, merged by the
+  // loader), or from zero. The ioc-db workflow runs this scrape from a checkout.
   let seededFromCompact = false;
   if (existingIOCs.packages.length === 0 && fs.existsSync(COMPACT_IOC_FILE)) {
     try {

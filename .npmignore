@@ -41,6 +41,7 @@ iocs-compact.json
 iocs.json.gz
 src/ioc/data/iocs.json
 src/ioc/data/iocs-compact.json
+src/ioc/data/iocs-lean.json
 src/ioc/data/.ossf-tree-sha
 ml-retrain/retrain-dataset.jsonl
 
