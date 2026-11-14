@@ -23,11 +23,12 @@ const path = require('path');
 const fs = require('fs');
 const { debugLog } = require('../../utils');
 const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
-const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS, NON_NETWORK_SINK_RECEIVER_ROOTS } = require('./constants.js');
+const { MAX_FLOW_CANDIDATES, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS, NON_NETWORK_SINK_RECEIVER_ROOTS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
   getExportName, getMemberChain, getReceiverRootName, resolveLocal
 } = require('./parse-utils.js');
+const { markIncomplete } = require('../../shared/completeness.js');
 
 /**
  * Detect cross-file dataflows: a tainted export from one module reaches a
@@ -52,10 +53,10 @@ function detectCrossFileFlows(graph, taintedExports, sinkExportsOrPath, packageP
     if (!ast) continue;
 
     // Pipe chain cross-file flows (runs before localTaint check — doesn't need localTaint)
-    if (sinkExports && flows.length < MAX_FLOWS) {
+    if (sinkExports && flows.length < MAX_FLOW_CANDIDATES) {
       const pipeFlows = findPipeChainCrossFileFlows(ast, relFile, graph, expandedTaint, sinkExports, packagePath);
       for (const flow of pipeFlows) {
-        if (flows.length >= MAX_FLOWS) break;
+        if (flows.length >= MAX_FLOW_CANDIDATES) break;
         const key = `${flow.sourceFile}→${flow.sinkFile}`;
         if (!flows.some(f => `${f.sourceFile}→${f.sinkFile}` === key)) {
           flows.push(flow);
@@ -73,7 +74,7 @@ function detectCrossFileFlows(graph, taintedExports, sinkExportsOrPath, packageP
     // Find sinks that use tainted variables (direct sink calls at call site)
     const sinks = findSinksUsingTainted(ast, localTaint);
     for (const sink of sinks) {
-      if (flows.length >= MAX_FLOWS) break;
+      if (flows.length >= MAX_FLOW_CANDIDATES) break;
       const taintInfo = localTaint[sink.taintedVar];
       flows.push({
         severity: 'CRITICAL',
@@ -87,10 +88,10 @@ function detectCrossFileFlows(graph, taintedExports, sinkExportsOrPath, packageP
     }
 
     // Find imported methods that internally contain sinks and receive tainted args
-    if (sinkExports && flows.length < MAX_FLOWS) {
+    if (sinkExports && flows.length < MAX_FLOW_CANDIDATES) {
       const importedSinkFlows = findImportedSinkMethodCalls(ast, localTaint, relFile, graph, sinkExports, packagePath);
       for (const flow of importedSinkFlows) {
-        if (flows.length >= MAX_FLOWS) break;
+        if (flows.length >= MAX_FLOW_CANDIDATES) break;
         // Deduplicate: skip if same sourceFile→sinkFile already found
         const key = `${flow.sourceFile}→${flow.sinkFile}`;
         if (!flows.some(f => `${f.sourceFile}→${f.sinkFile}` === key)) {
@@ -99,8 +100,9 @@ function detectCrossFileFlows(graph, taintedExports, sinkExportsOrPath, packageP
       }
     }
 
-    if (flows.length >= MAX_FLOWS) {
-      debugLog(`[MODULE-GRAPH] Flow limit reached (${MAX_FLOWS}), returning partial results`);
+    if (flows.length >= MAX_FLOW_CANDIDATES) {
+      debugLog(`[MODULE-GRAPH] Flow candidate limit reached (${MAX_FLOW_CANDIDATES}), returning partial results`);
+      markIncomplete('moduleGraph', 'flow-candidate-limit', { limit: MAX_FLOW_CANDIDATES, observed: flows.length });
       break;
     }
   }

@@ -30,7 +30,8 @@ try {
  * @param {object} result - Full scan result object
  * @param {object} options - CLI options
  * @param {object} processed - Processed data from processor
- * @returns {Promise<number>} Exit code (0 = clean, >0 = number of failing threats, max 125)
+ * @returns {Promise<number>} Exit code (0 = clean, >0 = number of failing threats, max 125;
+ *   with options.failOnInconclusive an INCONCLUSIVE analysis returns at least 1)
  */
 async function output(result, options, processed) {
   const { deduped, enrichedThreats, sandboxData, pythonInfo, breakdown,
@@ -52,9 +53,15 @@ async function output(result, options, processed) {
     }
   }
 
+  // Fail-closed opt-in (incompleteness contract, architecture lot 1): a partial
+  // analysis is not a clean one. Off by default so existing CI gates keep their
+  // exit codes; when set, an INCONCLUSIVE scan exits >= 1 whatever --fail-on says.
+  const inconclusiveFloor = options.failOnInconclusive && result.analysis &&
+    result.analysis.status === 'INCONCLUSIVE' ? 1 : 0;
+
   // Calculate exit code based on fail level
   const failLevel = options.failLevel || 'high';
-  if (failLevel === 'none') return 0;
+  if (failLevel === 'none') return inconclusiveFloor;
   const severityLevels = {
     critical: ['CRITICAL'],
     high: ['CRITICAL', 'HIGH'],
@@ -65,7 +72,7 @@ async function output(result, options, processed) {
   const levelsToCheck = severityLevels[failLevel] || severityLevels.high;
   const failingThreats = deduped.filter(t => levelsToCheck.includes(t.severity));
 
-  return Math.min(failingThreats.length, 125);
+  return Math.max(Math.min(failingThreats.length, 125), inconclusiveFloor);
 }
 
 module.exports = { output };

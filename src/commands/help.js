@@ -51,6 +51,7 @@ const helpText = `
     --explain           Detailed explanations with MITRE references
     --breakdown         Show score breakdown by threat
     --fail-on [level]   Exit code threshold (critical|high|medium|low, default: high)
+    --fail-on-inconclusive  Exit non-zero when the analysis is INCONCLUSIVE (fail closed)
     --webhook [url]     Discord/Slack webhook (HTTPS only)
     --paranoid          Ultra-strict detection mode
     --exclude [dir]     Exclude directory from scan (repeatable)
@@ -135,6 +136,7 @@ const commandHelp = {
     --explain           Detailed explanations with MITRE references
     --breakdown         Show score breakdown by threat
     --fail-on [level]   Exit code threshold (critical|high|medium|low, default: high)
+    --fail-on-inconclusive  Exit non-zero when the analysis is INCONCLUSIVE (fail closed)
     --webhook [url]     Discord/Slack webhook (HTTPS only)
     --paranoid          Ultra-strict detection mode
     --exclude [dir]     Exclude directory from scan (repeatable)
