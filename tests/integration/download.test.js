@@ -309,6 +309,207 @@ async function runDownloadTests() {
     catch { threw = true; }
     assert(threw, 'must reject when the archive does not exist (callers then fall back to metadata)');
   });
+
+  // --- zip slip / tar ".." (lint follow-up 2026-11-14): the documented reason for allowing
+  // non-literal fs paths in download.js is that archive member names never escape destDir.
+  // Each case builds root/dest and checks that nothing appears in root outside dest.
+  {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const zlib = require('zlib');
+    const { extractArchive } = require('../../src/shared/download.js');
+    const listOutside = (root, dest) => {
+      const out = [];
+      const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (p === dest) continue; if (e.isDirectory()) walk(p); else out.push(p); } };
+      walk(root);
+      return out;
+    };
+    // Hand-built ustar member (type '0' file or '2' symlink) with an arbitrary, hostile name.
+    const tarMember = (name, body, type = '0', linkname = '') => {
+      const header = Buffer.alloc(512);
+      header.write(name, 0, 100, 'utf8');
+      header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116);
+      header.write(body.length.toString(8).padStart(11, '0') + '\0', 124);
+      header.write('00000000000\0', 136);
+      header.write('        ', 148); header.write(type, 156); header.write(linkname, 157, 100, 'utf8');
+      header.write('ustar\0', 257); header.write('00', 263);
+      let sum = 0; for (const b of header) sum += b;
+      header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+      return Buffer.concat([header, body, Buffer.alloc((512 - (body.length % 512)) % 512)]);
+    };
+    const tgzOf = (...members) => zlib.gzipSync(Buffer.concat([...members, Buffer.alloc(1024)]));
+    const hostileTgz = (name, body) => tgzOf(tarMember(name, body));
+
+    test('DOWNLOAD: control - the hand-built tar extracts a normal member (fixture is valid)', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarok-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'ok.tgz');
+        fs.writeFileSync(tgz, hostileTgz('safe.txt', Buffer.from('fine')));
+        extractArchive(tgz, dest);
+        assert(fs.existsSync(path.join(dest, 'safe.txt')), 'a normal member must be extracted, else the traversal test proves nothing');
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    test('DOWNLOAD: a tar member named ../escape.txt never lands outside destDir', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, hostileTgz('../escape.txt', Buffer.from('pwned')));
+        try { extractArchive(tgz, dest); } catch { /* refusing the archive is fine */ }
+        const outside = listOutside(root, dest).filter(p => p !== tgz);
+        assert(outside.length === 0, 'tar wrote outside destDir: ' + JSON.stringify(outside));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    // Tar slip through a symlink: member 1 is a symlink "link" -> "../outside", member 2 a file
+    // "link/pwned.txt" written THROUGH it. Refusing ".." in member names does not cover this;
+    // safe extraction needs tar to delay symlinks (GNU) or refuse to write through them (bsdtar).
+    test('DOWNLOAD: a tar symlink member cannot be used to write outside destDir', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tarsymslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        const outside = path.join(root, 'outside');
+        fs.mkdirSync(dest);
+        fs.mkdirSync(outside);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, tgzOf(
+          tarMember('link', Buffer.alloc(0), '2', '../outside'),
+          tarMember('link/pwned.txt', Buffer.from('pwned'))));
+        try { extractArchive(tgz, dest); } catch { /* refusing the archive is fine */ }
+        assert(!fs.existsSync(path.join(outside, 'pwned.txt')), 'a file was written outside destDir through the symlink');
+        assert(fs.readdirSync(outside).length === 0, 'the outside directory must stay empty: ' + JSON.stringify(fs.readdirSync(outside)));
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    // --- partial-extraction evasion (2026-11-14): tar extracts every member it accepts and
+    // exits non-zero on the refused one. extractArchive used to throw, so the monitor never
+    // scanned a package that npm (node-tar skips the entry) installs. Now: keep, report, scan.
+    const { extractArchiveDetailed, extractionFindings } = require('../../src/shared/download.js');
+    const { auditTarBuffer } = require('../../src/shared/tar-audit.js');
+    const tarOf = (...members) => Buffer.concat([...members, Buffer.alloc(1024)]);
+    const PKG = Buffer.from('{"name":"evasion-fixture","version":"1.0.0"}');
+    const withTmp = (prefix, fn) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+      try { return fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    };
+
+    for (const [label, hostile, reason] of [
+      ['write-through-symlink', [tarMember('package/link', Buffer.alloc(0), '2', '../../outside'), tarMember('package/link/x.txt', Buffer.from('x'))], 'write-through-symlink'],
+      ['dot-dot member', [tarMember('package/../../escape.txt', Buffer.from('x'))], 'dot-dot-name']
+    ]) {
+      test(`DOWNLOAD: a ${label} no longer hides the package (partial extraction is kept and reported)`, () => withTmp('muaddib-tarpartial-', root => {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const tgz = path.join(root, 'evil.tgz');
+        fs.writeFileSync(tgz, tgzOf(tarMember('package/package.json', PKG), ...hostile, tarMember('package/index.js', Buffer.from('module.exports = 1;'))));
+        const report = extractArchiveDetailed(tgz, dest);
+        assert(report.partial === true, 'tar refused a member, the report must say partial: ' + JSON.stringify(report));
+        assert(report.dir === path.join(dest, 'package'), 'package root still detected, got ' + report.dir);
+        assert(fs.existsSync(path.join(report.dir, 'package.json')), 'members before the refused one are extracted');
+        assert(fs.existsSync(path.join(report.dir, 'index.js')), 'members after the refused one are extracted');
+        assert(report.hostileMembers.some(m => m.reason === reason), `expected a ${reason} member, got ` + JSON.stringify(report.hostileMembers));
+        const types = extractionFindings(report).map(t => t.type + ':' + t.severity);
+        assert(types.includes('archive_hostile_member:HIGH') && types.includes('archive_partial_extraction:LOW'), 'findings: ' + types.join(','));
+        assert(extractArchive(tgz, fs.mkdtempSync(path.join(root, 'again-'))).endsWith('package'), 'extractArchive returns the root instead of throwing');
+      }));
+    }
+
+    test('DOWNLOAD: a complete extraction reports partial=false and no archive findings', () => withTmp('muaddib-tarfull-', root => {
+      const dest = path.join(root, 'dest');
+      fs.mkdirSync(dest);
+      const tgz = path.join(root, 'ok.tgz');
+      fs.writeFileSync(tgz, tgzOf(tarMember('package/package.json', PKG), tarMember('package/index.js', Buffer.from('1'))));
+      const report = extractArchiveDetailed(tgz, dest);
+      assert(report.partial === false && !report.hostileMembers, 'clean archive: ' + JSON.stringify(report));
+      assert(extractionFindings(report).length === 0, 'no findings for a complete extraction');
+    }));
+
+    test('DOWNLOAD: an archive tar cannot read at all still throws (nothing to scan)', () => withTmp('muaddib-targarbage-', root => {
+      const dest = path.join(root, 'dest');
+      fs.mkdirSync(dest);
+      const tgz = path.join(root, 'garbage.tgz');
+      fs.writeFileSync(tgz, Buffer.from('this is not a gzip stream at all'));
+      let threw = false;
+      try { extractArchiveDetailed(tgz, dest); } catch { threw = true; }
+      assert(threw, 'an archive that yields no member must keep throwing (callers fall back to metadata)');
+    }));
+
+    // auditTarBuffer: the decision is made on raw headers, independent of the tar implementation.
+    test('TAR-AUDIT: flags dot-dot, absolute, write-through-symlink and escaping hardlink members', () => {
+      const r = auditTarBuffer(tarOf(
+        tarMember('package/ok.js', Buffer.from('1')),
+        tarMember('package/../x', Buffer.from('1')),
+        tarMember('/etc/abs', Buffer.from('1')),
+        tarMember('package/l', Buffer.alloc(0), '2', 'somewhere'),
+        tarMember('package/l/inner.js', Buffer.from('1')),
+        tarMember('package/h', Buffer.alloc(0), '1', '../../etc/passwd')));
+      const reasons = r.hostileMembers.map(m => m.reason).sort();
+      assert(JSON.stringify(reasons) === JSON.stringify(['absolute-name', 'dot-dot-name', 'hardlink-escape', 'write-through-symlink']), 'reasons: ' + JSON.stringify(r.hostileMembers));
+      assert(r.members === 6 && r.truncated === false, 'counts: ' + JSON.stringify(r));
+    });
+
+    test('TAR-AUDIT: does not flag a venv-style absolute symlink TARGET, a dir replacing a symlink, or ".." inside a file name', () => {
+      const r = auditTarBuffer(tarOf(
+        tarMember('pkg/venv/bin/python', Buffer.alloc(0), '2', '/usr/bin/python3'),
+        tarMember('pkg/rel', Buffer.alloc(0), '2', '../sibling'),
+        tarMember('pkg/swap', Buffer.alloc(0), '2', 'target'),
+        tarMember('pkg/swap', Buffer.alloc(0), '5'),
+        tarMember('pkg/swap/file.txt', Buffer.from('1')),
+        tarMember('pkg/a..b.js', Buffer.from('1')),
+        tarMember('./pkg/./c.js', Buffer.from('1')),
+        tarMember('pkg/hl', Buffer.alloc(0), '1', 'pkg/a..b.js')));
+      assert(r.hostileMembers.length === 0, 'benign archive flagged: ' + JSON.stringify(r.hostileMembers));
+    });
+
+    test('TAR-AUDIT: reads names from GNU longname (L) and PAX (x) headers', () => {
+      const longName = 'package/' + 'd/'.repeat(60) + '../../../../escape';
+      const pax = (k, v) => { let rec = ` ${k}=${v}\n`; let len = rec.length; len += String(len + String(len).length).length; rec = `${len}${rec}`; return Buffer.from(rec); };
+      const r = auditTarBuffer(tarOf(
+        tarMember('././@LongLink', Buffer.from(longName + '\0'), 'L'),
+        tarMember('package/placeholder', Buffer.from('1')),
+        tarMember('PaxHeader', pax('path', 'package/../pax-escape'), 'x'),
+        tarMember('package/innocent', Buffer.from('1'))));
+      const names = r.hostileMembers.map(m => m.name);
+      assert(names.includes(longName) && names.includes('package/../pax-escape'), 'names: ' + JSON.stringify(names));
+    });
+
+    test('TAR-AUDIT: a truncated stream stops without throwing and says truncated', () => {
+      const full = tarOf(tarMember('package/a.js', Buffer.alloc(2000, 0x61)));
+      const r = auditTarBuffer(full.subarray(0, 700));
+      assert(r.truncated === true, 'truncated data must be reported: ' + JSON.stringify(r));
+    });
+
+    test('DOWNLOAD: a zip entry named ../escape.txt is refused before anything is written', () => {
+      const AdmZip = require('adm-zip');
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-zipslip-'));
+      try {
+        const dest = path.join(root, 'dest');
+        fs.mkdirSync(dest);
+        const zip = new AdmZip();
+        zip.addFile('ok.txt', Buffer.from('ok'));
+        // adm-zip strips "../" when writing, so write a same-length placeholder and patch the raw
+        // name bytes (local header + central directory; the name is not covered by the CRC).
+        zip.addFile('zzzescape.txt', Buffer.from('pwned'));
+        const zp = path.join(root, 'evil.zip');
+        const raw = zip.toBuffer();
+        let at = raw.indexOf('zzzescape.txt');
+        while (at !== -1) { raw.write('../', at, 'latin1'); at = raw.indexOf('zzzescape.txt', at + 1); }
+        fs.writeFileSync(zp, raw);
+        const names = new AdmZip(zp).getEntries().map(e => e.entryName);
+        assert(names.includes('../escape.txt'), 'fixture must really carry a "../" entry, got ' + JSON.stringify(names));
+        let threw = false;
+        try { extractArchive(zp, dest); } catch (e) { threw = /escapes destDir/.test(e.message); }
+        assert(threw, 'extractArchive must refuse the zip with an "escapes destDir" error');
+        assert(listOutside(root, dest).filter(p => p !== zp).length === 0, 'nothing may be written outside destDir');
+        assert(fs.readdirSync(dest).length === 0, 'refused before extraction: dest stays empty');
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+  }
 }
 
 module.exports = { runDownloadTests };

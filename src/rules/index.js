@@ -2959,6 +2959,32 @@ const RULES = {
     mitre: 'T1195.002'
   },
 
+  archive_hostile_member: {
+    id: 'MUADDIB-PKG-024',
+    name: 'Hostile Archive Member',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'L\'archive du package contient un membre que tar refuse : nom en ../ ou absolu, fichier ecrit a travers un lien symbolique declare plus tot dans l\'archive, ou lien dur vers une cible hors du package. npm pack et python -m build ne produisent jamais un tel membre. Effet recherche : GNU tar et bsdtar extraient le reste puis sortent en erreur, un scanner qui abandonne sur cette erreur ne scanne rien, alors que npm ignore l\'entree refusee (lien symbolique ou nom en ..) et installe le reste : verifie le 2026-11-14 par un vrai npm install (npm 10.9.0 Linux, npm 11.14.1 Windows), sortie 0, le require() du package charge le code, rien n\'est ecrit hors du package. Le membre est lu dans les en-tetes tar bruts, independamment de l\'implementation de tar. Un lien symbolique dont seule la CIBLE est absolue (bin/python d\'un venv) n\'est pas signale. Recensement 2026-11-14 : 0 sur 3242 archives du corpus.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1027'
+  },
+  archive_partial_extraction: {
+    id: 'MUADDIB-PKG-025',
+    name: 'Partial Archive Extraction',
+    severity: 'LOW',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'tar a refuse une partie de l\'archive et est sorti en erreur : seuls les membres extraits ont ete scannes. Le resultat est incomplet (a traiter comme non concluant, pas comme sain). Le message cite l\'erreur de tar ; voir PKG-024 pour les membres refuses.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+
   // Audit v3 Bypass Detections (AST-062 to AST-069)
   reflect_apply_require: {
     id: 'MUADDIB-AST-062',
