@@ -20,6 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const { RULES, getRuleDomain } = require('../rules/index.js');
+const { describe: describeIncomplete } = require('../shared/completeness.js');
 
 const pkgVersion = (() => {
   try {
@@ -69,6 +70,10 @@ function generateSARIF(results) {
             network: results.sandbox.network || {}
           }
         } : {},
+        // Incompleteness contract (architecture lot 1): an INCONCLUSIVE scan carries
+        // one error-level tool notification per bound reached (SARIF Appendix I), so
+        // SARIF consumers never read "no results" as "clean".
+        ...(results.analysis ? { invocations: [sarifInvocation(results.analysis)] } : {}),
         results: (results.threats || []).map(threat => ({
           ruleId: threat.rule_id,
           level: sarifLevel(threat.severity),
@@ -98,6 +103,28 @@ function generateSARIF(results) {
   };
 
   return sarif;
+}
+
+// SARIF 2.1.0 Appendix I ("Detecting incomplete result sets"): executionSuccessful
+// false means the tool failed to start, exited with a failure code or crashed
+// (§3.20.14) - not our case, the scan ran to the end. The standard signal that
+// "the results cannot be assumed to be complete" is a toolExecutionNotification
+// whose level is "error" (§3.20.21, §3.58.6). So: executionSuccessful stays true,
+// one error-level notification per bound reached.
+function sarifInvocation(analysis) {
+  const incomplete = Array.isArray(analysis.incomplete) ? analysis.incomplete : [];
+  const invocation = {
+    executionSuccessful: true,
+    properties: { analysisStatus: analysis.status }
+  };
+  if (incomplete.length > 0) {
+    invocation.toolExecutionNotifications = incomplete.map(entry => ({
+      level: 'error',
+      descriptor: { id: `incomplete/${entry.component}/${entry.reason}` },
+      message: { text: `Analysis incomplete: ${describeIncomplete(entry)}` }
+    }));
+  }
+  return invocation;
 }
 
 function sarifLevel(severity) {

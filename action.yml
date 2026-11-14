@@ -15,6 +15,10 @@ inputs:
     description: 'Minimum severity that fails the workflow (critical, high, medium, low, none)'
     required: false
     default: 'high'
+  fail-on-inconclusive:
+    description: 'Fail the workflow when the analysis is INCONCLUSIVE (an internal bound was reached, findings may be missing). Requires a muaddib-scanner version that supports --fail-on-inconclusive.'
+    required: false
+    default: 'false'
   sarif:
     description: 'If set to a file path, generate SARIF and upload it to the GitHub Security tab (requires security-events: write). Empty = no SARIF (single scan).'
     required: false
@@ -35,6 +39,9 @@ outputs:
   risk-level:
     description: 'Risk level (SAFE / LOW / MEDIUM / HIGH / CRITICAL)'
     value: ${{ steps.report.outputs.risk_level }}
+  analysis-status:
+    description: 'COMPLETE, INCONCLUSIVE (an internal bound was reached), or UNKNOWN (scanner version without the field)'
+    value: ${{ steps.report.outputs.analysis_status }}
   threats-count:
     description: 'Total number of threats detected'
     value: ${{ steps.report.outputs.threats_count }}
@@ -45,7 +52,7 @@ outputs:
     description: 'Number of HIGH threats detected'
     value: ${{ steps.report.outputs.high_count }}
   exit-code:
-    description: 'Scan exit code (0 = passed fail-on gate, non-zero = threats at/above fail-on)'
+    description: 'Scan exit code (0 = passed fail-on gate, non-zero = threats at/above fail-on, or an INCONCLUSIVE analysis when fail-on-inconclusive is true)'
     value: ${{ steps.scan.outputs.exit_code }}
   sarif-file:
     description: 'Path to the generated SARIF file (empty if sarif input was not set)'
@@ -72,6 +79,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_PARANOID: ${{ inputs.paranoid }}
+        INPUT_FAIL_ON_INCONCLUSIVE: ${{ inputs.fail-on-inconclusive }}
       run: |
         set -o pipefail
         RESULT_FILE="$RUNNER_TEMP/muaddib-result.json"
@@ -79,6 +87,9 @@ runs:
         CMD=(muaddib scan "$INPUT_PATH" --fail-on "$INPUT_FAIL_ON" --json)
         if [ "$INPUT_PARANOID" = "true" ]; then
           CMD+=(--paranoid)
+        fi
+        if [ "$INPUT_FAIL_ON_INCONCLUSIVE" = "true" ]; then
+          CMD+=(--fail-on-inconclusive)
         fi
 
         # Authoritative scan: --json gives us BOTH the machine-readable result

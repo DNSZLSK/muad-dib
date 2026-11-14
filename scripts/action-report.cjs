@@ -50,6 +50,9 @@ const threats = (result && Array.isArray(result.threats)) ? result.threats : [];
 
 const riskScore = Number.isFinite(summary.riskScore) ? summary.riskScore : 0;
 const riskLevel = summary.riskLevel || 'UNKNOWN';
+// Incompleteness contract: absent on scanner versions that predate it.
+const analysisStatus = (result && result.analysis && result.analysis.status) || 'UNKNOWN';
+const incomplete = (result && result.analysis && Array.isArray(result.analysis.incomplete)) ? result.analysis.incomplete : [];
 const critical = Number.isFinite(summary.critical) ? summary.critical : 0;
 const high = Number.isFinite(summary.high) ? summary.high : 0;
 const medium = Number.isFinite(summary.medium) ? summary.medium : 0;
@@ -58,6 +61,7 @@ const threatsCount = threats.length;
 
 setOutput('risk_score', riskScore);
 setOutput('risk_level', riskLevel);
+setOutput('analysis_status', analysisStatus);
 setOutput('threats_count', threatsCount);
 setOutput('critical_count', critical);
 setOutput('high_count', high);
@@ -70,6 +74,12 @@ console.log(`  MUAD'DIB supply-chain scan`);
 console.log(bar);
 console.log(`  Risk score : ${riskScore}/100  (${riskLevel})`);
 console.log(`  Threats    : ${threatsCount}  (critical ${critical}, high ${high}, medium ${medium}, low ${low})`);
+if (analysisStatus === 'INCONCLUSIVE') {
+  console.log('  Analysis   : INCONCLUSIVE - an internal bound was reached, findings may be missing');
+  for (const e of incomplete.slice(0, 10)) {
+    console.log(`               ${e && e.component}: ${e && e.reason}${e && e.limit !== undefined ? ` (limit ${e.limit})` : ''}`);
+  }
+}
 console.log(bar);
 
 if (threatsCount > 0) {

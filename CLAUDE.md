@@ -19,8 +19,9 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4545 tests across 167 files)
-npm run lint      # ESLint with security plugin
+npm test          # Run all tests (custom framework, 4545 tests across 169 files)
+npm run lint      # ESLint with security plugin (0 errors, warning ratchet)
+npm run test:coverage  # c8 + coverage floors (.c8rc.json)
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
 ```
@@ -44,11 +45,11 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` (yargs) delegates to `src/index.js`.
 
-**Pipeline:** Module graph pre-analysis → tree-sitter-python parser bootstrap (async WASM load, no analysis) → deobfuscation → 22 parallel scanners (Promise.allSettled) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → contextual FP caps → output (CLI/JSON/HTML/SARIF). **Note:** `muaddib scan` does NOT run the ML classifier — the XGBoost model in `src/ml/` is exercised only by `muaddib evaluate` (offline metric replay) and `muaddib monitor` (LOG-ONLY since 2026-04-08, model collapsed pending retrain — see `src/monitor/queue.js:1154`).
+**Pipeline:** Module graph pre-analysis → tree-sitter-python parser bootstrap (async WASM load, no analysis) → deobfuscation → 22 isolated scanners (run in sequence: they are synchronous, `Promise.allSettled` only isolates crashes; see `src/pipeline/executor.js`) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → contextual FP caps → output (CLI/JSON/HTML/SARIF). **Note:** `muaddib scan` does NOT run the ML classifier — the XGBoost model in `src/ml/` is exercised only by `muaddib evaluate` (offline metric replay) and `muaddib monitor` (LOG-ONLY since 2026-04-08, model collapsed pending retrain — see `src/monitor/queue.js:1154`).
 
-**Scanner modules (22 parallel + 2 pre-analysis + 7 conditional/post-processing + 1 metadata):**
+**Scanner modules (22 isolated + 2 pre-analysis + 7 conditional/post-processing + 1 metadata):**
 
-- **22 parallel** via `Promise.allSettled` (`src/pipeline/executor.js`): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI), python (IOC match), ai-config, github-actions, hash, ioc-strings, anti-forensic, stub-package, monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST, tree-sitter WASM), anti-scanner-injection (ASI), binary-source (BINSRC).
+- **22 isolated** via `Promise.allSettled` (`src/pipeline/executor.js`; they run one after the other, the 45 s per-scanner timeout cannot interrupt a synchronous scanner - architecture lot 2): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI), python (IOC match), ai-config, github-actions, hash, ioc-strings, anti-forensic, stub-package, monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST, tree-sitter WASM), anti-scanner-injection (ASI), binary-source (BINSRC).
 - **2 pre-analysis**: `module-graph/` (cross-file flows, 5 s timeout) and `deobfuscate.js`. The python-ast WASM bootstrap (`initPythonParser()`) emits nothing and is not counted.
 - **7 conditional/post-processing**: `paranoid.js`, 3x `temporal-*`, `reachability.js` (FP downgrade), `phantom-gyp.js` (COMPOUND-017), `native-drop-exec.js` (COMPOUND-020).
 - **1 metadata fetcher**: `npm-registry.js` (age/downloads/maintainers, used by monitor/evaluate).
@@ -116,7 +117,10 @@ Run `npm run ci:local` before every push. It replays the exact PR gate from `.gi
 3. `node scripts/check-no-tracked-node-modules.js`
 4. `npm audit --audit-level=high` (needs network; advisories can appear between pushes without any code change)
 5. `npm run docs:stats:check` (stats.json + doc markers vs source)
-6. `npm test`
+6. `npm run lint` (0 errors, stale `eslint-disable` directives are errors, `--max-warnings` ratchet: fix warnings and lower the number, never raise it)
+7. `npm test`
+
+The `coverage` CI job is blocking: `npm run test:coverage` runs c8 (locked devDependency) with the floors of `.c8rc.json`. Raise the floors when coverage rises, never lower them to pass.
 
 **Version bump rule:** a version change must land in the SAME commit as ALL files rewritten by `npm run docs:stats` — `stats.json` plus every marker-bearing doc (`CLAUDE.md`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `docs/INDEX.md`, `docs/README.fr.md`, `docs/threat-model.md`). Committing a subset makes `docs:stats:check` fail in CI even when it passes locally, because the local working tree is coherent but the pushed tree is not. After any bump: `npm run docs:stats`, then `git add` everything it touched (`git diff --name-only` to list), then commit.
 
@@ -125,9 +129,9 @@ Run `npm run ci:local` before every push. It replays the exact PR gate from `.gi
 | Metric | Value |
 |--------|-------|
 | Version | **<!--stat:version-->2.12.2<!--/stat:version-->** |
-| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->167<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
-| Rules | **<!--stat:rulesTotal-->274<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
-| Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
+| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->169<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
+| Rules | **<!--stat:rulesTotal-->276<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
+| Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> isolated** (Promise.allSettled, run in sequence) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **99 samples** in `tests/ground-truth/attacks.json` (npm + PyPI; 96 at the v2.11.48 measurement below). |
 | TPR@3 (detection rate) | **95.74%** (90/94 in-scope), v2.11.48. Misses: browser-only patterns (lottie-player, polyfill-io, trojanized-jquery) + 1. |
 | TPR@20 (alert rate) | **88.30%** (83/94 in-scope), v2.11.48. |

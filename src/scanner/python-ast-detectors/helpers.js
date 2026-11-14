@@ -66,7 +66,6 @@ function walk(node, ctx, visitors, scopeDepth = 0) {
     } catch (e) {
       // A buggy detector must NEVER crash the whole scan. Log and move on.
       if (process.env.MUADDIB_DEBUG) {
-        // eslint-disable-next-line no-console
         console.error(`[python-ast] visitor ${node.type} failed:`, e.message);
       }
     }

@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> parallel scanners** (<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
+MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> isolated scanners** (run one after the other; a crash in one never stops the others) (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
 
 ---
 
@@ -129,7 +129,10 @@ muaddib scan . --sarif results.sarif     # SARIF (GitHub Security)
 ```bash
 muaddib scan . --fail-on critical  # Fail only on CRITICAL
 muaddib scan . --fail-on high      # Fail on HIGH and CRITICAL (default)
+muaddib scan . --fail-on-inconclusive  # Also fail when the analysis is INCONCLUSIVE (fail closed)
 ```
+
+A scan is `INCONCLUSIVE` when an internal bound was reached (timeout, graph size, file cap): some code was not fully analyzed and findings may be missing. The JSON carries `analysis.status`, SARIF carries error-level tool notifications. By default the exit code ignores it; use `--fail-on-inconclusive` in CI to treat a partial analysis as a failure.
 
 ### Paranoid mode
 
@@ -185,7 +188,7 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 
 ## Features
 
-### <!--stat:scanners-->22<!--/stat:scanners--> parallel scanners
+### <!--stat:scanners-->22<!--/stat:scanners--> isolated scanners
 
 | Scanner | Detection |
 |---------|-----------|
@@ -212,9 +215,9 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
 | Anti-Scanner Injection (ASI) | Prompt-injection text in comments/strings that coerces an LLM code reviewer into a clean verdict or into skipping an obfuscated payload (ASI-001..004, Hades campaign 2026-06) |
 
-### <!--stat:rulesTotal-->274<!--/stat:rulesTotal--> detection rules
+### <!--stat:rulesTotal-->276<!--/stat:rulesTotal--> detection rules
 
-All rules (<!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules) for the complete rules reference.
+All rules (<!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -374,7 +377,7 @@ npm test
 
 ### Testing
 
-- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->167<!--/stat:testFiles--> modular test files
+- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->169<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
@@ -395,7 +398,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

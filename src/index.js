@@ -19,12 +19,19 @@
 
 const { isPackageLevelThreat, computeGroupScore } = require('./scoring.js');
 const { resetAll } = require('./scan-context.js');
+const { withScanRecord } = require('./shared/completeness.js');
 const { initialize } = require('./pipeline/initializer.js');
 const { execute } = require('./pipeline/executor.js');
 const { process: processThreats } = require('./pipeline/processor.js');
 const { output } = require('./pipeline/outputter.js');
 
-async function run(targetPath, options = {}) {
+// Each scan gets its own incompleteness record (AsyncLocalStorage), so concurrent
+// scans in one process (`muaddib watch` re-scans without awaiting) stay isolated.
+function run(targetPath, options = {}) {
+  return withScanRecord(() => runScan(targetPath, options));
+}
+
+async function runScan(targetPath, options = {}) {
   try {
     // Phase 1: Initialization (validate, IOCs, config, Python detection)
     const { pythonDeps, warnings } = await initialize(targetPath, options);

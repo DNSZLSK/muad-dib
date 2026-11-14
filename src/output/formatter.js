@@ -23,6 +23,7 @@ const { saveCycloneDX } = require('./cyclonedx.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
 const { renderScoreBar } = require('../utils.js');
+const { describe: describeIncomplete } = require('../shared/completeness.js');
 
 // P0a — domain tag formatter for CLI text output.
 // Returns a bracketed 3-letter code like "[MAL]" / "[AUT]" / "[ENG]" / "[VUL]"
@@ -32,6 +33,32 @@ function domainTag(threat) {
   const d = (threat && threat.domain) || (threat && threat.type ? getRuleDomain(threat.type) : 'malware');
   const code = DOMAIN_CODES[d] || 'UNK';
   return '[' + code + ']';
+}
+
+// Incompleteness contract (architecture lot 1): an INCONCLUSIVE analysis is
+// never presented as SAFE / OK. The score and riskLevel themselves are unchanged.
+function isInconclusive(result) {
+  return !!(result && result.analysis && result.analysis.status === 'INCONCLUSIVE');
+}
+
+function displayLevel(result) {
+  const level = result.summary.riskLevel;
+  return isInconclusive(result) && level === 'SAFE' ? 'INCONCLUSIVE' : level;
+}
+
+function printAnalysisStatus(result) {
+  if (!isInconclusive(result)) return;
+  console.log('[ANALYSIS] INCONCLUSIVE - an internal bound was reached, findings may be missing:');
+  for (const entry of result.analysis.incomplete) console.log('           - ' + describeIncomplete(entry));
+  console.log('');
+}
+
+function printNoThreats(result) {
+  if (isInconclusive(result)) {
+    console.log('[ANALYSIS] No threats detected in the analyzed part - the analysis is INCONCLUSIVE, not SAFE.\n');
+  } else {
+    console.log('[OK] No threats detected.\n');
+  }
 }
 
 /**
@@ -83,7 +110,8 @@ function formatOutput(result, options, ctx) {
     if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
     else console.log('');
 
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${result.summary.riskLevel}`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${displayLevel(result)}`);
+    printAnalysisStatus(result);
     if (mostSuspiciousFile) {
       console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
       if (packageScore > 0) {
@@ -115,7 +143,7 @@ function formatOutput(result, options, ctx) {
     }
 
     if (enrichedThreats.length === 0) {
-      console.log('[OK] No threats detected.\n');
+      printNoThreats(result);
     } else {
       console.log(`[ALERT] ${enrichedThreats.length} threat(s) detected:\n`);
       enrichedThreats.forEach((t, i) => {
@@ -159,7 +187,8 @@ function formatOutput(result, options, ctx) {
     if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
     else console.log('');
 
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${result.summary.riskLevel}`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${displayLevel(result)}`);
+    printAnalysisStatus(result);
     if (mostSuspiciousFile) {
       console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
       if (packageScore > 0) {
@@ -191,7 +220,7 @@ function formatOutput(result, options, ctx) {
     }
 
     if (deduped.length === 0) {
-      console.log('[OK] No threats detected.\n');
+      printNoThreats(result);
     } else {
       // v2.11.11: Filter degraded LOW quick-scan signals from default output.
       // These are regex-only detections in overflow files (no AST context) and

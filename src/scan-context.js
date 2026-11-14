@@ -30,11 +30,13 @@
  *   utils.js          — file list cache, content cache, extra excludes
  *   scoring.js        — severity weights, risk thresholds (config overrides)
  *   shared/constants.js — max file size (config override), AST cache
+ *   shared/completeness.js — incompleteness record (analysis.status)
  */
 
 const { setExtraExcludes, clearFileListCache } = require('./utils.js');
 const { resetConfigOverrides } = require('./scoring.js');
 const { resetMaxFileSize, clearASTCache } = require('./shared/constants.js');
+const { resetCompleteness } = require('./shared/completeness.js');
 
 /**
  * Reset all per-scan mutable state.
@@ -46,6 +48,7 @@ function resetAll() {
   resetConfigOverrides();
   resetMaxFileSize();
   clearASTCache();
+  resetCompleteness();
 }
 
 module.exports = { resetAll };

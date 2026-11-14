@@ -93,8 +93,8 @@ async function scanPackageJson(targetPath) {
 
   // Scan lifecycle scripts
   for (const scriptName of SUSPICIOUS_SCRIPTS) {
-    if (typeof scripts[scriptName] === 'string' && scripts[scriptName]) {
-      const scriptContent = scripts[scriptName];
+    const scriptContent = scripts[scriptName];
+    if (typeof scriptContent === 'string' && scriptContent) {
 
       threats.push({
         type: 'lifecycle_script',
@@ -203,7 +203,7 @@ async function scanPackageJson(targetPath) {
     : typeof pkg.version === 'number' ? String(pkg.version) : '';
   const majorVersion = parseInt(versionStr.split('.')[0], 10);
   if ([99, 999, 9999].includes(majorVersion)) {
-    const hasInstallHook = ['preinstall', 'install', 'postinstall'].some(s => typeof scripts[s] === 'string' && scripts[s]);
+    const hasInstallHook = ['preinstall', 'install', 'postinstall'].map(s => scripts[s]).some(v => typeof v === 'string' && v);
     if (hasInstallHook) {
       threats.push({
         type: 'version_99_preinstall',

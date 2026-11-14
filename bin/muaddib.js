@@ -91,6 +91,9 @@ let sarifOutput = null;
 let cyclonedxOutput = null;
 let explainMode = false;
 let failLevel = 'high';
+// Fail-closed opt-in (incompleteness contract): a boolean flag with no value, read
+// outside the option loop (unknown '-' flags are ignored by the loop).
+const failOnInconclusive = options.includes('--fail-on-inconclusive');
 let webhookUrl = null;
 let paranoidMode = false;
 let excludeDirs = [];
@@ -328,6 +331,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     cyclonedx: cyclonedxOutput,
     explain: explainMode,
     failLevel: failLevel,
+    failOnInconclusive: failOnInconclusive,
     webhook: webhookUrl,
     paranoid: paranoidMode,
     temporal: temporalMode || temporalFullMode,

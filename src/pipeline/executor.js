@@ -36,7 +36,8 @@ const { scanGitHubActions } = require('../scanner/github-actions.js');
 const { scanEntropy } = require('../scanner/entropy.js');
 const { scanAIConfig } = require('../scanner/ai-config.js');
 const { deobfuscate } = require('../scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows } = require('../scanner/module-graph');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_FLOWS } = require('../scanner/module-graph');
+const { markIncomplete, resetCompleteness } = require('../shared/completeness.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
@@ -191,6 +192,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // the event loop alive (process hang). _stop() is idempotent.
   try {
 
+  // Fresh incompleteness record for this scan (resetAll() also clears it at the
+  // end; this guards direct execute() callers that never reach resetAll()).
+  resetCompleteness();
+
   // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
 
@@ -207,14 +212,38 @@ async function execute(targetPath, options, pythonDeps, warnings) {
 
   // Cross-file module graph analysis (before individual scanners)
   // Bounded: 5s timeout to prevent DoS on large/adversarial packages
-  const MODULE_GRAPH_TIMEOUT_MS = 5000;
+  // Env-tunable (non-negative integer ms) so the timeout path is testable
+  // deterministically; any invalid value falls back to the 5 s default.
+  // Strict parse: only a plain non-negative integer string is accepted. An empty or
+  // malformed value (`MUADDIB_MODULE_GRAPH_TIMEOUT_MS=` in a CI config) must not
+  // become Number('') === 0, which would skip cross-file analysis on every scan.
+  const rawGraphBudget = process.env.MUADDIB_MODULE_GRAPH_TIMEOUT_MS;
+  const MODULE_GRAPH_TIMEOUT_MS = typeof rawGraphBudget === 'string' && /^\d+$/.test(rawGraphBudget.trim())
+    ? parseInt(rawGraphBudget.trim(), 10) : 5000;
   let crossFileFlows = [];
   // Threats ABOUT the module graph (audit DF-C1): truncation when the package
   // exceeds MAX_GRAPH_NODES. Separate from crossFileFlows because the latter
   // gets filtered/reshaped (line ~316 requires sourceFile && sinkFile).
   const moduleGraphThreats = [];
   if (!options.noModuleGraph) {
+    // Incompleteness contract (architecture lot 1): the graph result is published
+    // exactly once, by this function, after its last step. The previous
+    // Promise.race let the losing work keep running and mutate crossFileFlows
+    // after the scan had moved on, so the verdict depended on which step was
+    // reached (28 -> 10 or 10 -> 28, audit 2026-09-29). Every step is synchronous,
+    // so a timer could never interrupt one anyway: the budget is now checked at
+    // step boundaries. Past the deadline the remaining steps are skipped, the
+    // flows already produced still go through the destination filter, and the
+    // analysis is marked INCONCLUSIVE.
+    const graphDeadline = Date.now() + MODULE_GRAPH_TIMEOUT_MS;
+    let graphTimedOut = false;
+    const overBudget = () => {
+      if (!graphTimedOut && Date.now() >= graphDeadline) graphTimedOut = true;
+      return graphTimedOut;
+    };
     const moduleGraphWork = async () => {
+      let direct = [];
+      let indirect = [];
       const graphMeta = {};
       const graph = await yieldThen(() => buildModuleGraph(targetPath, graphMeta));
       if (graphMeta.truncated) {
@@ -229,34 +258,56 @@ async function execute(targetPath, options, pythonDeps, warnings) {
           maxNodes: graphMeta.maxNodes
         });
       }
-      const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
-      const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
-      crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
-      // Callback-based cross-file flow detection
-      const callbackFlows = await yieldThen(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
-      crossFileFlows = crossFileFlows.concat(callbackFlows);
-      // EventEmitter cross-module flow detection
-      const emitterFlows = await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath));
-      crossFileFlows = crossFileFlows.concat(emitterFlows);
+      // A step that throws stops the remaining steps but keeps the flows already
+      // produced (they still go through the filter below): a crash is reported
+      // as INCONCLUSIVE, never as an empty, complete result.
+      try {
+        run: {
+          if (overBudget()) break run;
+          const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
+          if (overBudget()) break run;
+          const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
+          if (overBudget()) break run;
+          direct = await yieldThen(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
+          if (overBudget()) break run;
+          // Callback-based cross-file flow detection
+          indirect = indirect.concat(await yieldThen(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath)));
+          if (overBudget()) break run;
+          // EventEmitter cross-module flow detection
+          indirect = indirect.concat(await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath)));
+        }
+      } catch (e) {
+        debugLog('[MODULE-GRAPH] Error:', e && e.message);
+        markIncomplete('moduleGraph', 'error');
+      }
       // FP gate (segment A): drop cross_file_dataflow flows whose network sink targets
       // only first-party/local/provider destinations — legit SDK calls, not exfil.
       // Suspicious/unknown/public-IP destinations and exec sinks are kept (ecto stays).
-      crossFileFlows = filterFirstPartyNetworkFlows(crossFileFlows, targetPath);
-    };
-    let graphTimerId;
-    const timeout = new Promise((_, reject) => {
-      graphTimerId = setTimeout(() => reject(new Error('Module graph timeout')), MODULE_GRAPH_TIMEOUT_MS);
-    });
-    try {
-      await Promise.race([moduleGraphWork(), timeout]);
-    } catch (e) {
-      // Graceful fallback — module graph is best-effort
-      debugLog('[MODULE-GRAPH] Error:', e && e.message);
-      if (e && e.message === 'Module graph timeout') {
-        warnings.push(`Module graph analysis timed out (${MODULE_GRAPH_TIMEOUT_MS / 1000}s) — cross-file flows may be incomplete`);
+      // Runs on whatever was produced, even after a timeout: an unfiltered candidate
+      // must never be published. The MAX_FLOWS quota applies AFTER the filter so
+      // filtered decoys cannot consume it.
+      direct = filterFirstPartyNetworkFlows(direct, targetPath);
+      // More flows than the quota survive the filter: the surplus is not published, so
+      // the analysis cannot claim to be complete. Measured 2026-11-13 on the 3 242-package
+      // corpus sample: the maximum is 5 flows after the filter, so this marks no package there.
+      if (direct.length > MAX_FLOWS) {
+        markIncomplete('moduleGraph', 'flow-limit', { limit: MAX_FLOWS, observed: direct.length });
+        direct = direct.slice(0, MAX_FLOWS);
       }
-    } finally {
-      clearTimeout(graphTimerId);
+      indirect = filterFirstPartyNetworkFlows(indirect, targetPath);
+      return direct.concat(indirect);
+    };
+    try {
+      crossFileFlows = await moduleGraphWork();
+    } catch (e) {
+      // buildModuleGraph or the filter threw: nothing reliable to publish.
+      debugLog('[MODULE-GRAPH] Error:', e && e.message);
+      markIncomplete('moduleGraph', 'error');
+      crossFileFlows = [];
+    }
+    if (graphTimedOut) {
+      markIncomplete('moduleGraph', 'timeout', { limit: MODULE_GRAPH_TIMEOUT_MS });
+      warnings.push(`Module graph analysis timed out (${MODULE_GRAPH_TIMEOUT_MS / 1000}s) — cross-file flows may be incomplete`);
     }
   }
 
@@ -284,7 +335,12 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   function withTimeout(fn, name) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        debugLog(`[TIMEOUT] Scanner ${name} exceeded ${SCANNER_TIMEOUT_MS / 1000}s — returning partial results`);
+        // Incompleteness contract: a timed-out scanner is never reported as a
+        // clean result. The scanners are synchronous today, so this timer cannot
+        // fire before they return (architecture lot 2 makes it effective); the
+        // contract is fixed here so that it holds once it can.
+        debugLog(`[TIMEOUT] Scanner ${name} exceeded ${SCANNER_TIMEOUT_MS / 1000}s`);
+        markIncomplete(name, 'timeout', { limit: SCANNER_TIMEOUT_MS });
         resolve([]);
       }, SCANNER_TIMEOUT_MS);
       yieldThen(fn).then(result => { clearTimeout(timer); resolve(result); })
@@ -349,8 +405,14 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const scannerErrors = [];
   const scanResult = settledResults.map((r, i) => {
     if (r.status === 'fulfilled') return r.value;
-    scannerErrors.push({ scanner: SCANNER_NAMES[i], error: r.reason });
-    console.error(`[WARN] Scanner ${SCANNER_NAMES[i]} failed: ${r.reason?.message || r.reason}`);
+    const message = String((r.reason && r.reason.message) || r.reason);
+    // `error` stays the raw reason (an Error serializes to {} in JSON); `message` is readable.
+    scannerErrors.push({ scanner: SCANNER_NAMES[i], error: r.reason, message });
+    console.error(`[WARN] Scanner ${SCANNER_NAMES[i]} failed: ${message}`);
+    // Incompleteness contract: a crashed scanner contributed nothing, so the scan cannot be
+    // COMPLETE. A one-line package.json value that crashed scanPackageJson hid a
+    // `postinstall: curl | sh` (score 75 -> 0, reported SAFE) before this mark.
+    markIncomplete(SCANNER_NAMES[i], 'error');
     return [];
   });
 
@@ -379,9 +441,18 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     binarySourceThreats
   ] = scanResult;
 
+  // A partial archive extraction (tar refused members, see download.js) means part of the
+  // package was never on disk: the scan is INCONCLUSIVE under the lot 1 contract, not only
+  // a LOW finding.
+  if (Array.isArray(options.extractionFindings) &&
+      options.extractionFindings.some(t => t && t.type === 'archive_partial_extraction')) {
+    markIncomplete('extraction', 'partial-archive');
+  }
+
   // Emit warning if file count cap was hit + quick-scan overflow files
   const quickScanThreats = [];
   if (wasFilesCapped()) {
+    markIncomplete('files', 'file-cap', { limit: 500 });
     warnings.push('File count cap reached (500 files) — overflow files scanned in quick-scan mode (lifecycle + child_process only).');
     const overflowFiles = getOverflowFiles();
     // v2.10.73 P3: Quick-scan is a DEGRADED regex-based pass — no AST, no scope
@@ -467,7 +538,11 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       message: `Cross-file dataflow: ${f.source} in ${f.sourceFile} → ${f.sink} in ${f.sinkFile}`,
       file: f.sinkFile
     })),
-    ...moduleGraphThreats
+    ...moduleGraphThreats,
+    // Archive-level findings from the caller's extraction (monitor/evaluate): a partial tar
+    // extraction and the members tar refused. Only these two types are accepted.
+    ...(Array.isArray(options.extractionFindings) ? options.extractionFindings : [])
+      .filter(t => t && (t.type === 'archive_hostile_member' || t.type === 'archive_partial_extraction'))
   ];
 
   // Paranoid mode

@@ -11,7 +11,7 @@ bin/muaddib.js (yargs CLI)
   └─► src/index.js — run(targetPath, options)
         ├─► Module Graph pre-analysis (src/scanner/module-graph/, directory of 9 files, 5s timeout)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
-        ├─► 22 parallel scanners (Promise.allSettled)
+        ├─► 22 isolated scanners (run in sequence, Promise.allSettled)
         │     ├── AST scanner (src/scanner/ast.js)                          [timeout 45s]
         │     ├── Dataflow scanner (src/scanner/dataflow.js)                [timeout 45s]
         │     ├── Shell scanner (src/scanner/shell.js)
@@ -33,7 +33,7 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 274 rules)
+        ├─► Rule enrichment (src/rules/index.js — 276 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         └─► Output (CLI / JSON / HTML / SARIF)
 
@@ -43,7 +43,7 @@ bin/muaddib.js (yargs CLI)
     src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** via `Promise.allSettled` (they are synchronous, so they run one after the other: allSettled isolates a crash, it does not parallelize, and the 45 s timeout cannot interrupt a running scanner - architecture lot 2) (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -51,12 +51,12 @@ bin/muaddib.js (yargs CLI)
 
 | Phase | Count | Modules | Mechanism |
 |-------|-------|---------|-----------|
-| Pre-analysis | 2 | `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow) | Sequential, before parallel phase |
-| Parallel | <!--stat:scanners-->22<!--/stat:scanners--> | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST tree-sitter), anti-scanner-injection (ASI-001..004), binary-source (BINSRC-001, binary masquerading as source) | `Promise.allSettled` (executor.js) |
+| Pre-analysis | 2 | `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow) | Sequential, before the scanner phase |
+| Isolated (sequential) | <!--stat:scanners-->22<!--/stat:scanners--> | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST tree-sitter), anti-scanner-injection (ASI-001..004), binary-source (BINSRC-001, binary masquerading as source) | `Promise.allSettled` (executor.js) |
 | Conditional / post-processing | 6 | `paranoid.js` (--paranoid), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal*), `reachability.js` (post-processor FP downgrade), `phantom-gyp.js` (Phantom Gyp compound correlator, post-processor at `processor.js:451`) | Skipped unless flag or post-pipeline |
 | Metadata fetcher | 1 | `npm-registry.js` | NPM API for age/downloads/maintainers (ML features, monitor, evaluate) |
 
-Total: **<!--stat:scannerFiles-->36<!--/stat:scannerFiles--> `.js` files** at `src/scanner/` root + **3 directories**: `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors--> files — the AST scanner's detector modules, split out of `ast.js`), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph--> files), and `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> files). Of the <!--stat:scannerFiles-->36<!--/stat:scannerFiles-->: 21 files serve the <!--stat:scanners-->22<!--/stat:scanners--> parallel scan functions (`python.js` provides 2 - `matchPythonIOCs` + `checkPyPITyposquatting`), `deobfuscate.js` is pre-analysis, 7 are conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec), `npm-registry.js` is metadata, `env-var-classification.js` is a taint-source helper (used by `dataflow.js` + `module-graph/`), and the remaining 5 (`release-zero.js`, `email-domain.js`, `pypi-maintainer.js`, `pypi-registry.js`, `pypi-release-zero.js`) are monitor-side / registry-metadata scanners invoked by the daemon, not the CLI scan path. Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
+Total: **<!--stat:scannerFiles-->36<!--/stat:scannerFiles--> `.js` files** at `src/scanner/` root + **3 directories**: `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors--> files — the AST scanner's detector modules, split out of `ast.js`), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph--> files), and `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> files). Of the <!--stat:scannerFiles-->36<!--/stat:scannerFiles-->: 21 files serve the <!--stat:scanners-->22<!--/stat:scanners--> isolated scan functions (`python.js` provides 2 - `matchPythonIOCs` + `checkPyPITyposquatting`), `deobfuscate.js` is pre-analysis, 7 are conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec), `npm-registry.js` is metadata, `env-var-classification.js` is a taint-source helper (used by `dataflow.js` + `module-graph/`), and the remaining 5 (`release-zero.js`, `email-domain.js`, `pypi-maintainer.js`, `pypi-registry.js`, `pypi-release-zero.js`) are monitor-side / registry-metadata scanners invoked by the daemon, not the CLI scan path. Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
 
 **Scanner pattern:** Each of the <!--stat:scanners-->22<!--/stat:scanners--> individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -86,20 +86,27 @@ Centralized constants in `src/scanner/module-graph/constants.js` + per-detector 
 
 | Constant | Value | File:line | Role |
 |---|---|---|---|
-| `MAX_GRAPH_NODES` | 5000 | `module-graph/constants.js:6` | Max files in dependency graph. Raised from 50 (v2.6.1) to 5000 in v2.11.x post-audit DF-C1 — now covers ~99.5% of npm packages. If exceeded, the graph build short-circuits and a warning is appended to scan result (`warnings[]`). |
-| `MAX_GRAPH_EDGES` | 400 | `module-graph/constants.js:7` | Max total import edges (prevents explosion on monorepos that still fit under node cap). |
-| `MAX_FLOWS` | 20 | `module-graph/constants.js:8` | Max `cross_file_dataflow` flows reported per package. Saturated flows are dropped silently in insertion order (audit DF-C2 — future fix: priority queue by severity). |
+| `MAX_GRAPH_NODES` | 5000 | `module-graph/constants.js` | Max files in dependency graph. Raised from 50 (v2.6.1) to 5000 in v2.11.x post-audit DF-C1 - now covers ~99.5% of npm packages. If exceeded, the graph build short-circuits, a `large_package_graph_truncated` finding and a warning are emitted, and the analysis is INCONCLUSIVE. |
+| `MAX_GRAPH_EDGES` | 400 | `module-graph/constants.js` | Max total import edges (prevents explosion on monorepos that still fit under node cap). Files after the one that crosses the bound are dropped from the graph (`meta.edgeTruncated`); the analysis is INCONCLUSIVE, since padding imports ahead of the real source/sink is enough to hide a flow. |
+| `MAX_FLOW_CANDIDATES` | 200 | `module-graph/constants.js` | Max raw direct flow candidates collected by `detectCrossFileFlows`, before the first-party destination filter. Reaching it makes the analysis INCONCLUSIVE. |
+| `MAX_FLOWS` | 20 | `module-graph/constants.js` | Max direct `cross_file_dataflow` flows reported per package, applied by the executor AFTER `filterFirstPartyNetworkFlows`. Before lot 1 the quota was applied first, so 20 decoys to a first-party destination consumed it and hid the real flow (audit 2026-09-29). |
 | `MAX_TAINT_DEPTH` | 50 | `module-graph/constants.js:9` | Max AST recursion depth in the walker (DoS guard against pathologically nested minified code). |
 | `MAX_PIPE_DEPTH` | 5 | `module-graph/detect-cross-file.js` | Walk depth for `.pipe()` chain taint following. |
 | `MAX_EMITTER_FLOWS` | 2 | `module-graph/detect-event-flows.js` | Cross-file EventEmitter flow cap per package (prevents explosion on event-heavy libraries). |
-| Module-graph timeout | 5 s | `src/pipeline/executor.js` | Hard timeout on the whole pre-analysis phase. Emits `module_graph_timeout` warning if exceeded. |
+| Module-graph budget | 5 s (`MUADDIB_MODULE_GRAPH_TIMEOUT_MS`) | `src/pipeline/executor.js` | Checked at step boundaries (every step is synchronous, so no timer can interrupt one). Past the deadline the remaining steps are skipped, the flows already produced still go through the destination filter, the result is published once, and the analysis is INCONCLUSIVE. Replaces a `Promise.race` that let the losing work keep mutating the flows after the scan moved on. |
 
 #### Bounded limits — intra-file dataflow (`src/scanner/dataflow.js`)
 
 | Constant | Value | File:line | Role |
 |---|---|---|---|
 | Source-sink proximity | 50 lines | `dataflow.js:987` | If `Math.abs(src.line - sink.line) < 50` → CRITICAL ; otherwise HIGH (graduation telemetry-only). Recovered to CRITICAL when `hasExposureSink && hasCredentialSource` regardless of distance. |
-| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; rejected scanners contribute an empty result + logged warning. |
+| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; a timed-out scanner marks the analysis INCONCLUSIVE. Known limit: these scanners are synchronous, so the timer cannot fire before they return (architecture lot 2). |
+
+### Incompleteness contract (architecture lot 1)
+
+The bounds above exist to cap work, but each one is also something an attacker can fill to hide a verdict. Each site that reaches a bound records it in `src/shared/completeness.js` (`markIncomplete(component, reason, { limit, observed })`, per-scan state cleared by `resetAll()` and at the start of `execute()`, deduplicated per `(component, reason)`, at most 32 entries). The processor turns a non-empty record into `analysis = { status: 'INCONCLUSIVE', incomplete: [...] }` and `summary.analysisStatus`, and adds one summary warning. Bounds that change the status: scanner timeout, module-graph timeout / error, node limit, edge limit, flow candidate limit, function BFS limit, 500-file cap. Per-file size skips do not (every large bundle would otherwise be INCONCLUSIVE and the signal would carry no information).
+
+The status is orthogonal to the score: `riskScore` and `riskLevel` are unchanged, so evaluate metrics and webhook/monitor consumers are unaffected. Outputs: CLI replaces the SAFE label and the `[OK] No threats detected` line, SARIF adds error-level `toolExecutionNotifications` (SARIF 2.1.0 Appendix I; `executionSuccessful` stays true, it is reserved for a tool that failed to start or crashed, §3.20.14), JSON carries the field, the monitor scan-ledger records `analysisStatus: 'INCONCLUSIVE'` (only when inconclusive, no routing change). The exit code is unchanged by default; `--fail-on-inconclusive` (opt-in) makes an INCONCLUSIVE scan exit >= 1 (`src/pipeline/outputter.js`).
 
 ## Scoring System
 
@@ -147,6 +154,7 @@ Source: `const CONFIDENCE_FACTORS = { high: 1.0, medium: 0.85, low: 0.6 };` appl
 |---|---|---|---|
 | `MAX_FN_REACH_FILES` | 250 | `reachability.js:370` | Max files processed by function-level reachability. Beyond this cap, the function-level BFS short-circuits and all threats remain considered live (fail-open). |
 | `MAX_FN_REACH_BYTES` | 1 MiB (1024×1024) | `reachability.js:371` | Per-file size cap. Files larger than 1 MB (typically minified bundles) are skipped — their threats remain live (fail-open). |
+| `MAX_FN_BFS_STEPS` | 5000 | `reachability.js` | Max functions dequeued by the intra-file BFS. If work is still queued at the bound, the file gets no dead range (abstention, like the dynamic fail-open) and the analysis is INCONCLUSIVE. Before lot 1 the unvisited callees were classified dead, so a long call chain downgraded the payload as `unreachable_function`. |
 
 **Known limitation** : cross-file function reachability is not implemented (intra-file BFS only, file-level approximation handles cross-file). Documented backlog item RC-M1: a non-exported helper called only via dynamic dispatch from another file is marked dead → severity LOW (FP). Combined with ESM `ImportDeclaration` gaps (DF-C3 backlog), the fail-direction is biased toward LOW, so cap saturation degrades coverage rather than introducing FPs.
 
@@ -260,6 +268,8 @@ quand un package suspect est surface.
 
 **FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → 12.9% (68/529, v2.9.4, compound scoring + new rules) → **10.8%** (57/529, v2.10.1, audit v3 FP reduction) → **14.0%** (74/532, v2.10.57, curated benign corpus rebuild) → **estimated 6-9%** (v2.10.74, P1-P4 FP cluster fixes — projected gain) → **15.6% measured** (85/545 scanned of 548, v2.10.95 metrics file — the v2.10.74 projected reduction did NOT materialize on the rebuilt corpus) → **post-filtre F1-F14 contextual FP caps** (v2.10.97 → v2.11.31) → **1.10% measured** (6/545 scanned of 548, v2.11.47 — the F1-F14 caps + the HARD/SOFT exfil split (F14) compounded over 11 versions to drive the rate down. The 6 remaining FPs are meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid — all real legitimate-pattern hits, not whitelist artifacts. FPR-after-ML-T1: 0.92% (5/545)).
 
+**"Validation sample" in CHANGELOG entries (corpus A/B).** Since 2026-09, changes are A/B-tested on a sample of about 3 240 packages drawn from the monitor archive (`D:\muaddib-corpus`, outside the repo). It is a non-regression bench, not a validation set: (1) the archive keeps a tarball only when MUAD'DIB scored the package >= 20, so every package was already flagged and the sample is not representative of npm; (2) labels are automatic (local IOC store, npm takedown 404): `FP_probable` means flagged, still published, in no feed, not confirmed benign, and `net_new` mixes malware with legitimate unpublishes; (3) only 21 confirmed TP; (4) the same sample is reused across changes. Valid use: paired before/after comparison of the same packages (score moves, errors per arm). Not valid: FPR, TPR, or any rate extrapolated to a user's dependencies. Those come from `muaddib evaluate` (curated benign, random npm, GT) only.
+
 **Datasets:**
 - Adversarial samples in `datasets/adversarial/` (67 samples)
 - Holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/` (40 samples)
@@ -369,7 +379,7 @@ Pre-alert embeds are ecosystem-aware: `registryLink()` resolves npm vs PyPI, and
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**<!--stat:rulesTotal-->274<!--/stat:rulesTotal--> rules: <!--stat:rulesCore-->269<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> rules: <!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
