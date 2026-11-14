@@ -632,6 +632,44 @@ async function runUtilsTests() {
       assert(overflow.length === 0, `Should have 0 overflow files, got ${overflow.length}`);
     } finally { cleanupTemp(tmp); clearFileListCache(); }
   });
+
+  // File cap order: executed files first. Without it, a deep executed payload loses to
+  // shallower decoys, since the cap kept the shallowest files.
+  function capOrderFixture(withMain) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-cap-order-'));
+    const deep = path.join(tmp, 'lib', 'a', 'b', 'c');
+    fs.mkdirSync(deep, { recursive: true });
+    fs.writeFileSync(path.join(deep, 'payload.js'), "require('./helper');");
+    fs.writeFileSync(path.join(deep, 'helper.js'), '// helper');
+    for (let i = 0; i < 10; i++) fs.writeFileSync(path.join(tmp, `decoy${i}.js`), `// decoy ${i}`);
+    const pkg = { name: 'cap-order', version: '1.0.0' };
+    if (withMain) pkg.main = 'lib/a/b/c/payload.js';
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(pkg));
+    return tmp;
+  }
+
+  test('UTILS: file cap keeps executed files first (deep main and its import survive 10 shallow decoys)', () => {
+    const tmp = capOrderFixture(true);
+    try {
+      clearFileListCache();
+      const files = findFiles(tmp, { maxFiles: 3 }).map(f => path.relative(tmp, f).split(path.sep).join('/'));
+      assert(files.includes('lib/a/b/c/payload.js'), `main must be kept under the cap, got ${files.join(', ')}`);
+      assert(files.includes('lib/a/b/c/helper.js'), `the file main requires must be kept, got ${files.join(', ')}`);
+      const overflow = getOverflowFiles().map(f => path.relative(tmp, f).split(path.sep).join('/'));
+      assert(!overflow.some(f => f.startsWith('lib/')), `no executed file may overflow, got ${overflow.join(', ')}`);
+    } finally { cleanupTemp(tmp); clearFileListCache(); }
+  });
+
+  test('UTILS: file cap without executed files keeps the depth order (deep unexecuted file overflows)', () => {
+    const tmp = capOrderFixture(false);
+    try {
+      clearFileListCache();
+      const files = findFiles(tmp, { maxFiles: 3 }).map(f => path.relative(tmp, f).split(path.sep).join('/'));
+      assert(files.every(f => f.startsWith('decoy')), `shallow files first when nothing is executed, got ${files.join(', ')}`);
+      const overflow = getOverflowFiles().map(f => path.relative(tmp, f).split(path.sep).join('/'));
+      assert(overflow.includes('lib/a/b/c/payload.js'), 'the deep unexecuted file must be in the overflow');
+    } finally { cleanupTemp(tmp); clearFileListCache(); }
+  });
 }
 
 module.exports = { runUtilsTests };

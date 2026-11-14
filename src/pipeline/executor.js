@@ -47,7 +47,7 @@ const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
 const { scanAntiScannerInjection } = require('../scanner/anti-scanner-injection.js');
 const { scanBinarySource } = require('../scanner/binary-source.js');
-const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog } = require('../utils.js');
+const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog, getMaxScanFiles } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { scanParanoid } = require('../scanner/paranoid.js');
 const { runTemporalAnalyses } = require('../temporal-runner.js');
@@ -470,8 +470,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // Emit warning if file count cap was hit + quick-scan overflow files
   const quickScanThreats = [];
   if (wasFilesCapped()) {
-    markIncomplete('files', 'file-cap', { limit: 500 });
-    warnings.push('File count cap reached (500 files) — overflow files scanned in quick-scan mode (lifecycle + child_process only).');
+    markIncomplete('files', 'file-cap', { limit: getMaxScanFiles() });
+    warnings.push(`File count cap reached (${getMaxScanFiles()} files) — overflow files scanned in quick-scan mode (lifecycle + child_process only).`);
     const overflowFiles = getOverflowFiles();
     // v2.10.73 P3: Quick-scan is a DEGRADED regex-based pass — no AST, no scope
     // tracking. It cannot distinguish exec() at module top-level (CRITICAL) from
