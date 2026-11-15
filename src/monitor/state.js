@@ -28,6 +28,7 @@ const readline = require('readline');
 const { isMainThread, threadId } = require('worker_threads');
 const { sanitizePackageName } = require('../shared/download.js');
 const { dataPath } = require('../shared/data-dir.js');
+const { isEvalRandomSample } = require('./eval-sample.js');
 
 // Event-loop stall attribution (event-loop-monitor.js): the periodic JSONL
 // compactions below are O(file-size) SYNCHRONOUS rewrites that run on the monitor
@@ -1136,6 +1137,10 @@ function appendScanLedger(e) {
       // Incompleteness contract (architecture lot 1): only written when the scan
       // was INCONCLUSIVE, same lean-ledger rule as isBurstExtra. No routing change.
       ...(e.analysisStatus === 'INCONCLUSIVE' ? { analysisStatus: 'INCONCLUSIVE' } : {}),
+      // Evaluation random sample (lot 7): every ledger outcome of a drawn package@version
+      // carries it, captured or not (timeout, error, size skip), so the sample's
+      // denominator and its non-captured part are both visible. Lean-ledger rule: only when true.
+      ...(isEvalRandomSample(e.ecosystem, e.name, e.version) ? { evalSample: true } : {}),
       // Static scan time (worker spawn to result, the clock of the 45 s kill), for the scans
       // that ran one. Lets a static-scan time bound be calibrated on production data.
       ...(Number.isFinite(e.staticMs) && e.staticMs >= 0 ? { staticMs: Math.round(e.staticMs) } : {}),

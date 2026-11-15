@@ -76,12 +76,12 @@ function getArchiveTgzMinScore() {
   return n;
 }
 
-function hasEnoughSpace(targetDir) {
+function hasEnoughSpace(targetDir, minFreeBytes = getMinFreeBytes()) {
   try {
     if (typeof fs.statfsSync !== 'function') return true; // Node <18.15 — fail-open
     const dirForStat = fs.existsSync(targetDir) ? targetDir : path.dirname(targetDir);
     const s = fs.statfsSync(dirForStat);
-    return s.bavail * s.bsize > getMinFreeBytes();
+    return s.bavail * s.bsize > minFreeBytes;
   } catch {
     return true; // never block archiving on a stat error
   }
@@ -232,6 +232,143 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
   return true;
 }
 
+// --- Evaluation capture (architecture lot 7) ---------------------------------
+//
+// archiveSuspectTarball keeps the .tgz only at score >= the tgz floor (20), so a
+// malware scored under 20 is never kept and no detection rate can be measured.
+// captureForEvaluation keeps, from the tarball the scan already downloaded (a local
+// copy, no second download), two extra populations:
+//   - 'random': the evaluation random sample (eval-sample.js), any score, the only
+//     unbiased population (FPR and detection rate denominators);
+//   - 'near_miss': score 1 to floor-1, where a missed malware most likely sits.
+// Both land in the same day directories as the suspect archive, so the existing
+// pull to the workstation and the .pulled safe-delete apply unchanged.
+//
+// Bounds, so that this never takes space from the suspect archive:
+//   - a higher free-space floor than the suspect archive (MUADDIB_EVAL_CAPTURE_MIN_FREE_GB,
+//     default 25, at least the suspect floor): under disk pressure the captures stop
+//     first and the last GB stay for score >= 20 suspects;
+//   - a daily byte budget for near misses (MUADDIB_EVAL_NEAR_MISS_MAX_MB_PER_DAY,
+//     default 2048, 0 disables near-miss capture). The random sample has no byte budget
+//     (a budget would cut it by time of day and bias it); its volume is set by its rate.
+
+const DEFAULT_EVAL_MIN_FREE_GB = 25;
+function getEvalMinFreeBytes() {
+  const raw = process.env.MUADDIB_EVAL_CAPTURE_MIN_FREE_GB;
+  let gb = DEFAULT_EVAL_MIN_FREE_GB;
+  if (raw !== undefined && raw !== '') {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 1000) gb = n;
+  }
+  return Math.max(gb * 1024 * 1024 * 1024, getMinFreeBytes());
+}
+
+const DEFAULT_EVAL_NEAR_MISS_MAX_MB = 2048;
+function getEvalNearMissMaxBytes() {
+  const raw = process.env.MUADDIB_EVAL_NEAR_MISS_MAX_MB_PER_DAY;
+  let mb = DEFAULT_EVAL_NEAR_MISS_MAX_MB;
+  if (raw !== undefined && raw !== '') {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 0 && n <= 1000000) mb = n;
+  }
+  return mb * 1024 * 1024;
+}
+
+// Near-miss bytes captured today (in-process; a restart resets it, which can at most
+// double one day's budget).
+const nearMissBudget = { day: null, bytes: 0, exhaustedLogged: false };
+
+/**
+ * Keep the tarball of a scanned package for evaluation when it is in the random
+ * sample or a near miss, and the suspect archive does not already keep it.
+ * Never throws; returns the capture reasons, or null when nothing was kept.
+ *
+ * @param {object} p
+ * @param {string} p.name
+ * @param {string} p.version
+ * @param {string|null} p.ecosystem
+ * @param {string} p.tgzPath - the tarball the scan downloaded (still on disk)
+ * @param {number|null} p.score - static risk score, null when the scan gave none (timeout)
+ * @param {boolean} p.suspectKeepsTarball - archiveSuspectTarball already keeps this .tgz
+ * @returns {Promise<string[]|null>}
+ */
+/* eslint-disable security/detect-non-literal-fs-filename -- destinations are ARCHIVE_DIR/<day>/<sanitized name>, checked to stay in the day dir below; the source is the scan's own mkdtemp tarball */
+async function captureForEvaluation({ name, version, ecosystem, tgzPath, score, suspectKeepsTarball }) {
+  try {
+    if (!name || !version || !tgzPath || suspectKeepsTarball) return null;
+    const { isEvalRandomSample } = require('./eval-sample.js');
+    const reasons = [];
+    if (isEvalRandomSample(ecosystem, name, version)) reasons.push('random');
+    const hasScore = typeof score === 'number' && Number.isFinite(score);
+    const isNearMiss = hasScore && score >= 1 && score < getArchiveTgzMinScore();
+    if (isNearMiss) reasons.push('near_miss');
+    if (reasons.length === 0) return null;
+
+    let size;
+    try { size = fs.statSync(tgzPath).size; } catch { return null; }
+
+    const dateStr = getArchiveDateString();
+    const nearMissOnly = !reasons.includes('random');
+    if (nearMissOnly) {
+      if (nearMissBudget.day !== dateStr) {
+        nearMissBudget.day = dateStr; nearMissBudget.bytes = 0; nearMissBudget.exhaustedLogged = false;
+      }
+      if (nearMissBudget.bytes + size > getEvalNearMissMaxBytes()) {
+        if (!nearMissBudget.exhaustedLogged) {
+          nearMissBudget.exhaustedLogged = true;
+          console.warn(`[Archive] Near-miss capture budget reached for ${dateStr} (${(getEvalNearMissMaxBytes() / 1048576).toFixed(0)}MB); near misses not kept until tomorrow`);
+        }
+        return null;
+      }
+    }
+    if (!hasEnoughSpace(ARCHIVE_DIR, getEvalMinFreeBytes())) return null;
+
+    const dayDir = path.join(ARCHIVE_DIR, dateStr);
+    const basename = `${sanitizeForFilename(name)}-${sanitizeForFilename(String(version))}`;
+    const destTgz = path.join(dayDir, `${basename}.tgz`);
+    const destJson = path.join(dayDir, `${basename}.json`);
+    if (path.dirname(destTgz) !== dayDir || path.dirname(destJson) !== dayDir) return null;
+    if (fs.existsSync(destTgz)) return null;
+
+    fs.mkdirSync(dayDir, { recursive: true });
+    // Copy under a temporary name then rename: a crash mid-copy never leaves a
+    // truncated .tgz that the pull would take for a capture.
+    const part = `${destTgz}.part`;
+    await fs.promises.copyFile(tgzPath, part);
+    fs.renameSync(part, destTgz);
+    if (nearMissOnly) nearMissBudget.bytes += size;
+
+    // A suspect under the tgz floor already has a JSON-only record: keep its fields.
+    let previous = {};
+    try { previous = JSON.parse(fs.readFileSync(destJson, 'utf8')) || {}; } catch { /* none yet */ }
+    const metadata = {
+      package: name,
+      version,
+      timestamp: new Date().toISOString(),
+      score: hasScore ? score : null,
+      priority: null,
+      rules_triggered: [],
+      llm_verdict: null,
+      ...previous,
+      ecosystem: ecosystem || null,
+      tarball_archived: true,
+      tarball_sha256: sha256File(destTgz),
+      eval_sample: reasons.includes('random'),
+      capture_reasons: reasons
+    };
+    fs.writeFileSync(destJson, JSON.stringify(metadata, null, 2));
+    return reasons;
+  } catch (err) {
+    console.warn(`[Archive] Evaluation capture failed for ${name}@${version}: ${err.message}`);
+    return null;
+  }
+}
+/* eslint-enable security/detect-non-literal-fs-filename */
+
+function _resetNearMissBudgetForTests() {
+  nearMissBudget.day = null; nearMissBudget.bytes = 0; nearMissBudget.exhaustedLogged = false;
+}
+
 /**
  * Parse a YYYY-MM-DD directory name into a UTC midnight Date.
  * Returns null for malformed names (so we never delete an unrelated directory).
@@ -312,9 +449,10 @@ function _dirBytes(fullPath) {
  *           disk wins; loud), or
  *        b. free space is below the min-free floor → purge OLDEST-first until the
  *           floor clears (losing old suspect beats a full disk that blocks
- *           capture of NEW suspect). Everything here is score>=tgz-min (benign is
- *           already JSON-only and gone in step 2), so oldest-first is the honest
- *           order.
+ *           capture of NEW suspect). Every .tgz here is a score>=tgz-min suspect
+ *           or an evaluation capture (random sample / near miss, which stop at a
+ *           higher free-space floor, so they never cause this pressure), so
+ *           oldest-first is the honest order.
  *
  * Stats: { kept, purged, freedBytes, retainedUnpulled, unpulledPurged }.
  * Errors are logged, never thrown.
@@ -398,6 +536,7 @@ function startPeriodicCleanup(intervalMs = DEFAULT_PERIODIC_INTERVAL_MS) {
 
 module.exports = {
   archiveSuspectTarball,
+  captureForEvaluation,
   cleanupOldArchives,
   startPeriodicCleanup,
   hasEnoughSpace,
@@ -410,6 +549,9 @@ module.exports = {
   getMaxRetentionDays,
   getMinFreeBytes,
   getArchiveTgzMinScore,
+  getEvalMinFreeBytes,
+  getEvalNearMissMaxBytes,
+  _resetNearMissBudgetForTests,
   parseArchiveDayDir,
   dayDirIsPulled,
   dayDirHasTarball

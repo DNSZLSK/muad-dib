@@ -63,6 +63,14 @@ Tune the monitor via env (see `src/monitor/tarball-archive.js`):
 | `MUADDIB_ARCHIVE_MAX_RETENTION_DAYS` | **hard ceiling**: even un-pulled days drop past this (bounded disk) | 30 |
 | `MUADDIB_ARCHIVE_MIN_FREE_GB` | stop archiving / start disk-pressure eviction below this free space | 5 |
 | `MUADDIB_ARCHIVE_TGZ_MIN_SCORE` | only score ≥ this keeps the heavy `.tgz` (benign = JSON-only) | 20 |
+| `MUADDIB_EVAL_SAMPLE_RATE` | fraction of all scanned packages kept as the evaluation random sample, any score (0 disables) | 0.01 |
+| `MUADDIB_EVAL_NEAR_MISS_MAX_MB_PER_DAY` | daily byte budget for near misses (score 1 to tgz floor - 1); 0 disables them | 2048 |
+| `MUADDIB_EVAL_CAPTURE_MIN_FREE_GB` | evaluation captures stop below this free space (never below the suspect floor) | 25 |
+| `MUADDIB_EVAL_SAMPLE_SALT` | draw key; unset = random key kept in `data/eval-sample.key` | unset |
+
+Evaluation captures (random sample, near misses) sit in the same day-dirs as the
+suspects; their JSON carries `capture_reasons` and `eval_sample`, and the scan
+ledger flags every drawn version `evalSample: true` (the sample's denominator).
 
 The safe-delete contract: an aged **un-pulled** day-dir holding tarballs is
 **kept** for the pull — dropped only past the hard ceiling, or oldest-first under

@@ -113,7 +113,7 @@ const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
 const { enqueueScan, dequeueScan, shouldPullNewest } = require('./scan-queue.js');
 
 // From ./tarball-archive.js
-const { archiveSuspectTarball } = require('./tarball-archive.js');
+const { archiveSuspectTarball, captureForEvaluation, getArchiveTgzMinScore } = require('./tarball-archive.js');
 
 // From ./deferred-sandbox.js
 const { enqueueDeferred } = require('./deferred-sandbox.js');
@@ -773,6 +773,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
   const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${sanitizePackageName(name)}-`));
   const meta = registryMeta || {};
   const cacheTrigger = meta._cacheTrigger || null;
+  // Evaluation capture (lot 7), decided in the finally below while the tarball is
+  // still on disk: the downloaded tarball, the static score, and whether the
+  // suspect archive already keeps this .tgz.
+  const evalCapture = { tgzPath: null, score: null, suspectKeepsTarball: false };
 
   try {
     // Pre-download size check: reject packages known to exceed MAX_TARBALL_SIZE
@@ -841,6 +845,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       stats.totalTimeMs += Date.now() - startTime;
       return;
     }
+    // Only a tarball within the scan size bound is ever kept for evaluation.
+    evalCapture.tgzPath = tgzPath;
 
     // C1: Size cap — skip full scan for large packages (>10MB unpacked).
     // Malware payloads are tiny (<1MB); 10MB has 10x safety margin.
@@ -1040,6 +1046,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       // to result), recorded in the scan ledger: the distribution any static-scan time bound
       // must be calibrated on (download, extraction and sandbox are excluded).
       result._staticMs = Date.now() - staticStart;
+      if (result && result.summary && typeof result.summary.riskScore === 'number') {
+        evalCapture.score = result.summary.riskScore;
+      }
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
         console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated, kept INCONCLUSIVE not clean)`);
@@ -1319,14 +1328,17 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Skip for fast-track packages (large boring enterprise packages — not worth archiving)
         if (meta.fastTrack) {
           console.log(`[MONITOR] FAST-TRACK SKIP: ${name}@${version} — skipping archive + LLM (static-only)`);
-        } else archiveSuspectTarball(name, version, tarballUrl, {
-          score: riskScore,
-          priority: tierLabel,
-          rulesTriggered: (result.threats || []).map(t => t.ruleId || t.type).filter(Boolean),
-          llmVerdict: null // LLM runs after this point; updated by webhook if needed
-        }).catch(err => {
-          console.warn(`[Archive] Failed for ${name}@${version}: ${err.message}`);
-        });
+        } else {
+          evalCapture.suspectKeepsTarball = riskScore >= getArchiveTgzMinScore();
+          archiveSuspectTarball(name, version, tarballUrl, {
+            score: riskScore,
+            priority: tierLabel,
+            rulesTriggered: (result.threats || []).map(t => t.ruleId || t.type).filter(Boolean),
+            llmVerdict: null // LLM runs after this point; updated by webhook if needed
+          }).catch(err => {
+            console.warn(`[Archive] Failed for ${name}@${version}: ${err.message}`);
+          });
+        }
 
         // Sandbox decision based on tier + smart skip for large low-signal packages.
         // Large packages (>15MB or >80 deps) with only MEDIUM/LOW findings timeout
@@ -1708,6 +1720,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     } catch { /* ledger is best-effort */ }
     return { sandboxResult: null, staticClean: false };
   } finally {
+    // Evaluation capture (lot 7): random sample or near miss, from the tarball
+    // already on disk, before the temp dir goes. Never throws.
+    if (evalCapture.tgzPath) {
+      await captureForEvaluation({ name, version, ecosystem, ...evalCapture });
+    }
     // Cleanup temp dir
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
