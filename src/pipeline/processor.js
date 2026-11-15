@@ -448,7 +448,12 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
 
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
-  applyFPReductions(deduped, reachableFiles, packageName, packageDeps, reachableFunctions);
+  // A repository checkout runs its .github/workflows (CI of the scanned project); a downloaded
+  // package never does for its consumer. npm pack never ships .git, and a crafted archive that
+  // adds one can only raise workflow findings, never lower anything. The monitor scans
+  // downloaded archives: always package context there.
+  const repositoryCheckout = !options.monitorMode && fs.existsSync(path.join(targetPath, '.git'));
+  applyFPReductions(deduped, reachableFiles, packageName, packageDeps, reachableFunctions, { repositoryCheckout });
 
   // FPR plan Chantier 3 - delta-aware decay. Threats present in the last 3
   // published versions (and not HC/IOC) decay to LOW. Default ON since v2.11.9.
