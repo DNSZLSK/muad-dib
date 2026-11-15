@@ -18,7 +18,8 @@
  */
 
 const path = require('path');
-const walk = require('acorn-walk');
+// Stack-safe walker with acorn-walk's exact semantics (deep member/call chains, lot 2).
+const walk = require('../shared/safe-walk.js');
 const { safeParse } = require('../shared/constants.js');
 const { nodeAcceptsSyntax, resetNodeSyntaxBudget } = require('../shared/node-syntax-check.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
@@ -77,7 +78,9 @@ async function analyzeAST(targetPath, options = {}) {
   resetNodeSyntaxBudget();
   return analyzeWithDeobfuscation(targetPath, analyzeFile, {
     deobfuscate: options.deobfuscate,
-    excludedFiles: EXCLUDED_FILES
+    excludedFiles: EXCLUDED_FILES,
+    component: 'analyzeAST',
+    byteBudget: options.byteBudget
   });
 }
 

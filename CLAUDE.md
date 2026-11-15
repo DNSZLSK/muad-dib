@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4545 tests across 170 files)
+npm test          # Run all tests (custom framework, 4545 tests across 171 files)
 npm run lint      # ESLint with security plugin (0 errors, warning ratchet)
 npm run test:coverage  # c8 + coverage floors (.c8rc.json)
 npm run scan      # Self-scan: node bin/muaddib.js scan .
@@ -49,7 +49,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Scanner modules (22 isolated + 2 pre-analysis + 7 conditional/post-processing + 1 metadata):**
 
-- **22 isolated** via `Promise.allSettled` (`src/pipeline/executor.js`; they run one after the other, the 45 s per-scanner timeout cannot interrupt a synchronous scanner - architecture lot 2): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI), python (IOC match), ai-config, github-actions, hash, ioc-strings, anti-forensic, stub-package, monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST, tree-sitter WASM), anti-scanner-injection (ASI), binary-source (BINSRC).
+- **22 isolated** via `Promise.allSettled` (`src/pipeline/executor.js`; they run one after the other; AST/dataflow/entropy/anti-forensic stop on a work budget in source characters (deterministic), and `muaddib scan` has a hard wall-clock watchdog, `MUADDIB_SCAN_HARD_TIMEOUT_S` - architecture lot 2): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI), python (IOC match), ai-config, github-actions, hash, ioc-strings, anti-forensic, stub-package, monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST, tree-sitter WASM), anti-scanner-injection (ASI), binary-source (BINSRC).
 - **2 pre-analysis**: `module-graph/` (cross-file flows, 5 s timeout) and `deobfuscate.js`. The python-ast WASM bootstrap (`initPythonParser()`) emits nothing and is not counted.
 - **7 conditional/post-processing**: `paranoid.js`, 3x `temporal-*`, `reachability.js` (FP downgrade), `phantom-gyp.js` (COMPOUND-017), `native-drop-exec.js` (COMPOUND-020).
 - **1 metadata fetcher**: `npm-registry.js` (age/downloads/maintainers, used by monitor/evaluate).
@@ -129,7 +129,7 @@ The `coverage` CI job is blocking: `npm run test:coverage` runs c8 (locked devDe
 | Metric | Value |
 |--------|-------|
 | Version | **<!--stat:version-->2.12.3<!--/stat:version-->** |
-| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->170<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
+| Tests | <!--stat:tests-->4545<!--/stat:tests--> non-skipped, across **<!--stat:testFiles-->171<!--/stat:testFiles-->** files. CI (Linux) is the reference: 0 failed. Local Windows runs on D: worktrees show environment-only failures (Defender quarantining `tests/samples/package/package.json`, git hooks, preload), never in CI. |
 | Rules | **<!--stat:rulesTotal-->276<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID). IDs: SECURITY.md; history: CHANGELOG.md. |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> isolated** (Promise.allSettled, run in sequence) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->16<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->7<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **99 samples** in `tests/ground-truth/attacks.json` (npm + PyPI; 96 at the v2.11.48 measurement below). |

@@ -324,6 +324,10 @@ if (command === 'version' || command === '--version' || command === '-v') {
   interactiveMenu().catch(handleFatal);
 } else if (command === 'scan') {
   if (wantHelp) showHelp('scan');
+  // Hard wall-clock bound (MUADDIB_SCAN_HARD_TIMEOUT_S, default 600 s): the synchronous
+  // scanners cannot be interrupted from this thread, so a watchdog thread kills the process
+  // past the limit (non-zero exit, fail closed). Disarmed as soon as the scan settles.
+  const disarmHardTimeout = require('../src/shared/hard-timeout.js').armHardTimeout();
   run(target, {
     json: jsonOutput,
     html: htmlOutput,
@@ -348,10 +352,12 @@ if (command === 'version' || command === '--version' || command === '-v') {
     configPath: configPath,
     autoSandbox: autoSandbox
   }).then(exitCode => {
+    disarmHardTimeout();
     // Use process.exitCode instead of process.exit() to let pending async work
     // (the non-blocking version update check) complete before the process exits.
     process.exitCode = exitCode;
   }).catch(err => {
+    disarmHardTimeout();
     console.error('[ERROR]', err.message);
     process.exitCode = 1;
   });

@@ -12,13 +12,13 @@ bin/muaddib.js (yargs CLI)
         ├─► Module Graph pre-analysis (src/scanner/module-graph/, directory of 9 files, 5s timeout)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
         ├─► 22 isolated scanners (run in sequence, Promise.allSettled)
-        │     ├── AST scanner (src/scanner/ast.js)                          [timeout 45s]
-        │     ├── Dataflow scanner (src/scanner/dataflow.js)                [timeout 45s]
+        │     ├── AST scanner (src/scanner/ast.js)                          [work budget]
+        │     ├── Dataflow scanner (src/scanner/dataflow.js)                [work budget]
         │     ├── Shell scanner (src/scanner/shell.js)
         │     ├── Package scanner (src/scanner/package.js)
         │     ├── Dependencies scanner (src/scanner/dependencies.js)
         │     ├── Obfuscation scanner (src/scanner/obfuscation.js)
-        │     ├── Entropy scanner (src/scanner/entropy.js)                  [timeout 45s]
+        │     ├── Entropy scanner (src/scanner/entropy.js)                  [work budget]
         │     ├── Typosquat scanner (src/scanner/typosquat.js)
         │     ├── Python IOC scanner (src/scanner/python.js — matchPythonIOCs)
         │     ├── PyPI typosquat (src/scanner/python.js — checkPyPITyposquatting)
@@ -26,7 +26,7 @@ bin/muaddib.js (yargs CLI)
         │     ├── GitHub Actions scanner (src/scanner/github-actions.js)
         │     ├── Hash scanner (src/scanner/hash.js)
         │     ├── IOC strings (src/scanner/ioc-strings.js, intel-triage P1.1)
-        │     ├── Anti-forensic AST (src/scanner/anti-forensic.js, intel-triage P1.2)  [timeout 45s]
+        │     ├── Anti-forensic AST (src/scanner/anti-forensic.js, intel-triage P1.2)  [work budget]
         │     ├── Stub package (src/scanner/stub-package.js, intel-triage P1.3)
         │     └── Monorepo scanner (src/scanner/monorepo.js, Sprint 1 audit MR-C2 fix)
         ├─► Deduplication
@@ -43,7 +43,7 @@ bin/muaddib.js (yargs CLI)
     src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** via `Promise.allSettled` (they are synchronous, so they run one after the other: allSettled isolates a crash, it does not parallelize, and the 45 s timeout cannot interrupt a running scanner - architecture lot 2) (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** via `Promise.allSettled` (they are synchronous, so they run one after the other: allSettled isolates a crash, it does not parallelize; the heavy ones stop on a work budget counted in source characters, and the CLI has a hard wall-clock watchdog - architecture lot 2) (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -100,11 +100,13 @@ Centralized constants in `src/scanner/module-graph/constants.js` + per-detector 
 | Constant | Value | File:line | Role |
 |---|---|---|---|
 | Source-sink proximity | 50 lines | `dataflow.js:987` | If `Math.abs(src.line - sink.line) < 50` → CRITICAL ; otherwise HIGH (graduation telemetry-only). Recovered to CRITICAL when `hasExposureSink && hasCredentialSource` regardless of distance. |
-| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; a timed-out scanner marks the analysis INCONCLUSIVE. Known limit: these scanners are synchronous, so the timer cannot fire before they return (architecture lot 2). |
+| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` work budget | 32 Mi source characters per scanner (`MUADDIB_SCANNER_WORK_BUDGET`) | `src/pipeline/executor.js`, `src/shared/analyze-helper.js` | These scanners are synchronous, so no timer can interrupt them, and a clock would make the verdict depend on the machine. Each counts the source characters it analyzes and, once the budget is reached, stops before the next file, keeps the findings already made and marks `work-budget` (INCONCLUSIVE). AST and dataflow analyze the executed files first; findings are reassembled in the original file order. Measured on 50 npm packages: at most 16.8 MB of analyzable source, 0.7 to 3.9 s per MB for AST + dataflow. A file whose analysis throws costs only that file (`file-error`, INCONCLUSIVE). Known limit: when several files are executed, their order among themselves is the directory order. |
+| Per-file walk depth | none | `src/shared/safe-walk.js` | `ast.js` and `dataflow.js` walk the AST with an explicit stack (same visit order as acorn-walk, checked by test): a 5 000-link member or call chain no longer overflows the stack. |
+| CLI hard time limit | 600 s (`MUADDIB_SCAN_HARD_TIMEOUT_S`, 0 disables) | `src/shared/hard-timeout.js`, `bin/muaddib.js` | A watchdog thread kills a `muaddib scan` still running past the limit: message on stderr, no result, non-zero exit (fail closed). The monitor has the equivalent: it terminates its scan worker after 45 s. `scanTrustedDepDiff`, which awaits registry I/O, keeps a real 45 s timer, started when it starts. |
 
 ### Incompleteness contract (architecture lot 1)
 
-The bounds above exist to cap work, but each one is also something an attacker can fill to hide a verdict. Each site that reaches a bound records it in `src/shared/completeness.js` (`markIncomplete(component, reason, { limit, observed })`, per-scan state cleared by `resetAll()` and at the start of `execute()`, deduplicated per `(component, reason)`, at most 32 entries). The processor turns a non-empty record into `analysis = { status: 'INCONCLUSIVE', incomplete: [...] }` and `summary.analysisStatus`, and adds one summary warning. Bounds that change the status: scanner timeout, module-graph timeout / error, node limit, edge limit, flow candidate limit, function BFS limit, file cap (2 000 files; the files the package executes are kept first, see `findFiles`). Per-file size skips do not (every large bundle would otherwise be INCONCLUSIVE and the signal would carry no information).
+The bounds above exist to cap work, but each one is also something an attacker can fill to hide a verdict. Each site that reaches a bound records it in `src/shared/completeness.js` (`markIncomplete(component, reason, { limit, observed })`, per-scan state cleared by `resetAll()` and at the start of `execute()`, deduplicated per `(component, reason)`, at most 32 entries). The processor turns a non-empty record into `analysis = { status: 'INCONCLUSIVE', incomplete: [...] }` and `summary.analysisStatus`, and adds one summary warning. Bounds that change the status: scanner work budget, per-file analysis error, scanner timeout (registry I/O), module-graph timeout / error, node limit, edge limit, flow candidate limit, function BFS limit, file cap (2 000 files; the files the package executes are kept first, see `findFiles`). Per-file size skips do not (every large bundle would otherwise be INCONCLUSIVE and the signal would carry no information).
 
 The status is orthogonal to the score: `riskScore` and `riskLevel` are unchanged, so evaluate metrics and webhook/monitor consumers are unaffected. Outputs: CLI replaces the SAFE label and the `[OK] No threats detected` line, SARIF adds error-level `toolExecutionNotifications` (SARIF 2.1.0 Appendix I; `executionSuccessful` stays true, it is reserved for a tool that failed to start or crashed, §3.20.14), JSON carries the field, the monitor scan-ledger records `analysisStatus: 'INCONCLUSIVE'` (only when inconclusive, no routing change). The exit code is unchanged by default; `--fail-on-inconclusive` (opt-in) makes an INCONCLUSIVE scan exit >= 1 (`src/pipeline/outputter.js`).
 
