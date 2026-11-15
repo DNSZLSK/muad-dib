@@ -27,6 +27,7 @@ const path = require('path');
 const readline = require('readline');
 const { isMainThread, threadId } = require('worker_threads');
 const { sanitizePackageName } = require('../shared/download.js');
+const { dataPath } = require('../shared/data-dir.js');
 
 // Event-loop stall attribution (event-loop-monitor.js): the periodic JSONL
 // compactions below are O(file-size) SYNCHRONOUS rewrites that run on the monitor
@@ -42,8 +43,8 @@ try { ({ runInstrumented: _runInstrumented } = require('./event-loop-monitor.js'
 
 // --- File path constants ---
 
-const STATE_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-state.json');
-const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.jsonl');
+const STATE_FILE = dataPath('monitor-state.json');
+const ALERTS_FILE = dataPath('monitor-alerts.jsonl');
 // Detections + temporal detections are append-only JSONL since the OOM fix.
 // Legacy *.json files are migrated once at boot via runStateMigrations() and
 // kept as *.json.migrated for forensic recovery (no longer read by the monitor).
@@ -53,14 +54,14 @@ const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.jso
 // The constant is resolved once at module load, so tests that don't set the env var
 // keep the default path unchanged.
 const DETECTIONS_FILE = process.env.MUADDIB_DETECTIONS_FILE
-  || path.join(__dirname, '..', '..', 'data', 'detections.jsonl');
-const DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'detections.json');
-const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
-const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', '..', 'data', 'last-daily-report.json');
-const DAILY_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'daily-stats.json');
-const RECENTLY_SCANNED_FILE = path.join(__dirname, '..', '..', 'data', 'recently-scanned.json');
-const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'temporal-detections.jsonl');
-const TEMPORAL_DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'temporal-detections.json');
+  || dataPath('detections.jsonl');
+const DETECTIONS_FILE_LEGACY = dataPath('detections.json');
+const SCAN_STATS_FILE = dataPath('scan-stats.json');
+const LAST_DAILY_REPORT_FILE = dataPath('last-daily-report.json');
+const DAILY_STATS_FILE = dataPath('daily-stats.json');
+const RECENTLY_SCANNED_FILE = dataPath('recently-scanned.json');
+const TEMPORAL_DETECTIONS_FILE = dataPath('temporal-detections.jsonl');
+const TEMPORAL_DETECTIONS_FILE_LEGACY = dataPath('temporal-detections.json');
 
 // --- Alerts/detections persistence limits ---
 const ALERTS_MAX_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold (matches ml-training.jsonl)
@@ -122,7 +123,7 @@ const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DI
 // Env-overridable — same prod-state-pollution guard as PYPI_SERIAL_FILE below
 // (the npm-seq roundtrip test used to unlink the REAL file).
 const NPM_SEQ_FILE = process.env.MUADDIB_NPM_SEQ_FILE
-  || path.join(__dirname, '..', '..', 'data', 'npm-seq.json');
+  || dataPath('npm-seq.json');
 const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/registry/_changes';
 const CHANGES_LIMIT = 1000;
 const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
@@ -143,20 +144,20 @@ const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to
 // PyPI changelog from 2011 (~15K ancient packages queued per poll). The test
 // harness points this at a tmp file so NO test can touch prod state.
 const PYPI_SERIAL_FILE = process.env.MUADDIB_PYPI_SERIAL_FILE
-  || path.join(__dirname, '..', '..', 'data', 'pypi-serial.json');
+  || dataPath('pypi-serial.json');
 const PYPI_XMLRPC_URL = 'https://pypi.org/pypi';
 const PYPI_CATCHUP_MAX = 100000;
 
 // --- Scan memory constants ---
 
-const SCAN_MEMORY_FILE = path.join(__dirname, '..', '..', 'data', 'scan-memory.json');
+const SCAN_MEMORY_FILE = dataPath('scan-memory.json');
 const SCAN_MEMORY_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_MEMORY_ENTRIES = 50000;
 const MEMORY_SCORE_TOLERANCE = 0.15; // ±15% score tolerance
 
 // --- Tarball cache constants ---
 
-const TARBALL_CACHE_DIR = process.env.MUADDIB_TARBALL_CACHE_DIR || path.join(__dirname, '..', '..', 'data', 'tarball-cache');
+const TARBALL_CACHE_DIR = process.env.MUADDIB_TARBALL_CACHE_DIR || dataPath('tarball-cache');
 const TARBALL_CACHE_INDEX_FILE = path.join(TARBALL_CACHE_DIR, 'cache-index.json');
 const TARBALL_CACHE_DEFAULT_RETENTION_DAYS = 7;
 const TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS = 30;
@@ -1053,7 +1054,7 @@ function _compactDetectionsJsonl() {
 // Mirrors the detections JSONL machinery (chunked iterate + periodic compaction).
 // Differences vs detections: (1) NO dedup — every scan event is a distinct record;
 // (2) higher cap + compaction interval since this logs every scan, not just findings.
-const SCAN_LEDGER_FILE = process.env.MUADDIB_SCAN_LEDGER_FILE || path.join(__dirname, '..', '..', 'data', 'scan-ledger.jsonl');
+const SCAN_LEDGER_FILE = process.env.MUADDIB_SCAN_LEDGER_FILE || dataPath('scan-ledger.jsonl');
 const MAX_SCAN_LEDGER = (() => {
   const raw = process.env.MUADDIB_SCAN_LEDGER_MAX;
   const n = raw ? parseInt(raw, 10) : NaN;

@@ -45,6 +45,7 @@ const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
 const { clearMetadataCache: clearTyposquatMetadataCache } = require('../scanner/typosquat.js');
 const { clearFileListCache } = require('../utils.js');
 const { clearASTCache } = require('../shared/constants.js');
+const { dataPath, dataDir } = require('../shared/data-dir.js');
 
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
@@ -92,7 +93,7 @@ const SPILL_DRAIN_INTERVAL_MS = (() => {
 })();
 const QUEUE_WARNING_THRESHOLD = 5_000;  // Warn if queue depth exceeds this
 const QUEUE_PERSIST_INTERVAL = 60_000;  // Persist queue to disk every 60s
-const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.json');
+const QUEUE_STATE_FILE = dataPath('queue-state.json');
 const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
 const MAX_QUEUE_PERSIST_SIZE = 200_000; // Don't persist if queue > 200K items (OOM guard)
 const MAX_RESTORE_QUEUE_SIZE = 100_000; // Cap restored queue at 100K items
@@ -155,7 +156,7 @@ function shouldSkipPoll(pollInProgress, pollStartedAt, now, watchdogMs, interval
 // multi-GB snapshot blocks the event loop ~10-60s — must be deliberate).
 const HEAPSNAPSHOT_MB = parseInt(process.env.MUADDIB_HEAPSNAPSHOT_MB, 10) || 0; // 0 = disabled
 const HEAPSNAPSHOT_MIN_FREE_GB = Math.max(1, parseInt(process.env.MUADDIB_HEAPSNAPSHOT_MIN_FREE_GB, 10) || 12);
-const HEAPSNAPSHOT_DIR = process.env.MUADDIB_HEAPSNAPSHOT_DIR || path.join(__dirname, '..', '..', 'data');
+const HEAPSNAPSHOT_DIR = process.env.MUADDIB_HEAPSNAPSHOT_DIR || dataDir();
 let heapSnapshotTaken = false;
 
 /**
@@ -471,9 +472,9 @@ function checkDiskSpace() {
     } catch { /* du failed */ }
 
     // Top consumers in data/
-    const dataDir = path.join(__dirname, '..', '..', 'data');
+    const dataRoot = dataDir();
     try {
-      const dataDu = runInstrumented('maint:disk-du-data', null, () => execFileSync('du', ['-sh', '--max-depth=1', dataDir], {
+      const dataDu = runInstrumented('maint:disk-du-data', null, () => execFileSync('du', ['-sh', '--max-depth=1', dataRoot], {
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
       }));
       const lines = dataDu.trim().split('\n')
@@ -772,7 +773,7 @@ function reportStats(stats) {
 // (native tarball/AST buffers) vs liveWorkers (worker-isolate heaps) vs runscDirs
 // (gVisor /tmp/runsc state dirs that survive `docker kill`). The heap-only breaker is
 // blind to all three — this is the data needed to choose the P1.2/P1.3 fix.
-const MEM_TREND_FILE = path.join(__dirname, '..', '..', 'data', 'mem-trend.jsonl');
+const MEM_TREND_FILE = dataPath('mem-trend.jsonl');
 const MEM_TREND_MAX_BYTES = 5 * 1024 * 1024; // bounded: truncate-rotate past 5MB
 
 function countRunscDirs() {
@@ -808,10 +809,10 @@ function appendMemTrend(currentMem, liveWorkers, queueLen) {
 // The chronic ~10×/day OOM crash-loop went unnoticed for weeks because NOTHING counted
 // restarts. Record each boot, expose the 24h count for the daily report, and fire an
 // alert (journal + rate-limited webhook) when the daemon is restarting abnormally often.
-const RESTARTS_FILE = path.join(__dirname, '..', '..', 'data', 'restarts.jsonl');
+const RESTARTS_FILE = dataPath('restarts.jsonl');
 const RESTARTS_MAX_LINES = 500;               // bounded resource (CLAUDE.md §2)
 const CRASH_LOOP_THRESHOLD_24H = 6;           // restarts/24h above this = alert
-const CRASH_LOOP_ALERT_MARKER = path.join(__dirname, '..', '..', 'data', '.crashloop-alert.json');
+const CRASH_LOOP_ALERT_MARKER = dataPath('.crashloop-alert.json');
 const CRASH_LOOP_ALERT_INTERVAL_MS = 6 * 3600 * 1000; // webhook at most once per 6h
 
 function countRecentRestarts(windowMs = 24 * 3600 * 1000) {

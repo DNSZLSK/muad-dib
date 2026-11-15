@@ -37,9 +37,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { dataPath } = require('../shared/data-dir.js');
 
 const FEED_HEALTH_FILE = process.env.MUADDIB_FEED_HEALTH_FILE ||
-  path.join(__dirname, '..', '..', 'data', 'feed-health.json');
+  dataPath('feed-health.json');
 
 // A feed must have shown at least this many IOCs at least once before a later zero counts
 // as "went dark". Below this a feed is too small/volatile to alarm on (FP guard). Real

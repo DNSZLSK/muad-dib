@@ -216,6 +216,10 @@ async function checkDepDiff(name, newVersion) {
  */
 async function scanTrustedDepDiff(targetPath, options = {}) {
   if (!options.trustedDepDiff && !options.monitorMode) return [];
+  // Offline run (air-gap, corpus measurements, the test suite): same contract as the other
+  // registry-dependent gates of the pipeline (processor.js), skipped silently. The monitor
+  // never sets it.
+  if (process.env.MUADDIB_NO_REGISTRY_FETCH === '1') return [];
   if (options.ecosystem && options.ecosystem !== 'npm') return [];
 
   let name = options.name || null;

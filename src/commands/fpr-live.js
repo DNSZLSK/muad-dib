@@ -34,13 +34,13 @@
 // never dressed up.
 
 const fs = require('fs');
-const path = require('path');
 const readline = require('readline');
 
 const { computeLedgerRollup, SCAN_LEDGER_FILE } = require('../monitor/state.js');
+const { dataPath } = require('../shared/data-dir.js');
 
-const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
-const OUT_FILE = path.join(__dirname, '..', '..', 'data', 'fpr-live.json');
+const SCAN_STATS_FILE = dataPath('scan-stats.json');
+const OUT_FILE = dataPath('fpr-live.json');
 
 function _pct(n, d) {
   if (!d || d <= 0) return null;

@@ -44,9 +44,9 @@
  */
 
 const fs = require('fs');
-const path = require('path');
+const { dataPath } = require('../shared/data-dir.js');
 
-const DEFAULT_FILE = path.join(__dirname, '..', '..', 'data', 'worker-mem.jsonl');
+const DEFAULT_FILE = dataPath('worker-mem.jsonl');
 const DEFAULT_MAX_MB = 64;        // rotate past 64MB (file + .1 = 128MB worst case, ~2.5 days at concurrency 8)
 const DEFAULT_SAMPLE_MS = 10000;  // per-worker isolate sample cadence
 

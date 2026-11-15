@@ -47,10 +47,10 @@
  */
 
 const fs = require('fs');
-const path = require('path');
+const { dataPath } = require('../shared/data-dir.js');
 
 const STATE_FILE = process.env.MUADDIB_DEGRADATION_FILE
-  || path.join(__dirname, '..', '..', 'data', 'degradation.json');
+  || dataPath('degradation.json');
 
 // One alarm per entry; re-entry within the cooldown stays silent.
 const REALARM_COOLDOWN_MS = (() => {

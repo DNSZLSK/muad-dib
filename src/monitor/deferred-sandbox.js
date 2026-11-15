@@ -39,13 +39,14 @@ const { isCanaryEnabled, TIER1_TYPES } = require('./classify.js');
 const { getWebhookUrl, alertedPackageRules, persistAlert, buildAlertData } = require('./webhook.js');
 const { sendWebhook } = require('../webhook.js');
 const { atomicWriteFileSync, markSandboxed } = require('./state.js');
+const { dataPath } = require('../shared/data-dir.js');
 
 // ── Constants ──
 const DEFERRED_QUEUE_MAX = 500;
 const DEFERRED_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const DEFERRED_MAX_RETRIES = 2;
 const DEFERRED_WORKER_INTERVAL_MS = 30_000; // 30s
-const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-queue.json');
+const DEFERRED_STATE_FILE = dataPath('deferred-queue.json');
 // Defense-in-depth: sandbox slot is precious. A T1b/T2 below this score
 // threshold is almost certainly a classification fallback false positive
 // (cf. classify.js:183 remediation) and should never consume the deferred
