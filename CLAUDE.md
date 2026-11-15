@@ -143,7 +143,6 @@ The `coverage` CI job is blocking: `npm run test:coverage` runs c8 (locked devDe
 | Operational coverage | Not the static GT. `coverage-audit.js` (daily) joins the GHSA malware feed with the scan ledger and archive for a GHSA-denominated operational TPR; `alertRate` is throughput, not TPR. |
 
 **Known issues:**
-- **plotly OOM**: `muaddib scan` on plotly 6.7.0 hits the 4 GB Node heap (scannable at v2.11.48). Memory regression on giant JS bundles, independent of scoring.
 - **Defensive IOC catalogs in `dist/`** (@hasna/shield 37 -> 100): a security tool shipping an IOC catalog in its executed `dist/` files is structurally indistinguishable from a real IOC hidden among decoys. Accepted known FP (CHANGELOG, hash/string IOC blind-spot fix).
 - **RC-H1** (reachability fail-open on `fork(path.resolve(__dirname, ...))`): the fail-closed fix exposes 8 benign agent/CLI tools at >= 75 (detached browser open, loopback servers, MCP self-registration). Not shippable until those rules are more precise.
 

@@ -565,6 +565,53 @@ async function runUtilsTests() {
     assert(ast1 === ast2, 'Both should be the same null reference');
   });
 
+  // --- AST cache bounded by source size (bundled-JS packages kept every AST alive: 4 GB) ---
+
+  test('UTILS: AST cache never holds more source than its byte budget', () => {
+    const { safeParse, getASTCacheStats, _setASTCacheMaxBytesForTest } = require('../src/shared/constants.js');
+    _setASTCacheMaxBytesForTest(10000);
+    try {
+      for (let i = 0; i < 200; i++) safeParse(`var v${i} = "${'x'.repeat(200)}";`);
+      const s = getASTCacheStats();
+      assert(s.sourceBytes <= 10000, `cached source ${s.sourceBytes} exceeds the 10000 budget`);
+      assert(s.entries > 0 && s.entries < 200, `expected a bounded, non-empty cache, got ${s.entries} entries`);
+    } finally { _setASTCacheMaxBytesForTest(null); }
+  });
+
+  test('UTILS: AST cache does not keep a source larger than the whole budget', () => {
+    const { safeParse, getASTCacheStats, _setASTCacheMaxBytesForTest } = require('../src/shared/constants.js');
+    _setASTCacheMaxBytesForTest(1000);
+    try {
+      const big = `var big = "${'y'.repeat(5000)}";`;
+      const a1 = safeParse(big);
+      const a2 = safeParse(big);
+      assert(a1 && a2 && a1 !== a2, 'a source above the budget must be parsed each time, never cached');
+      assert(getASTCacheStats().sourceBytes === 0, 'nothing may be cached for it');
+    } finally { _setASTCacheMaxBytesForTest(null); }
+  });
+
+  test('UTILS: AST cache evicts the oldest entries first', () => {
+    const { safeParse, getASTCacheStats, _setASTCacheMaxBytesForTest } = require('../src/shared/constants.js');
+    _setASTCacheMaxBytesForTest(100);
+    try {
+      const a = 'var a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa";'; // 40 units each
+      const b = 'var b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbb";';
+      const c = 'var c = "ccccccccccccccccccccccccccccc";';
+      const astA = safeParse(a);
+      const astB = safeParse(b);
+      safeParse(c); // 120 > 100: evicts a only
+      assert(getASTCacheStats().sourceBytes === 80, `expected b + c cached, got ${getASTCacheStats().sourceBytes}`);
+      assert(safeParse(b) === astB, 'b is still cached');
+      assert(safeParse(a) !== astA, 'a was evicted and is parsed again');
+    } finally { _setASTCacheMaxBytesForTest(null); }
+  });
+
+  test('UTILS: default AST cache budget is a few MB of source, not an entry count', () => {
+    const { getASTCacheStats, AST_CACHE_MAX_SOURCE_BYTES } = require('../src/shared/constants.js');
+    assert(getASTCacheStats().maxSourceBytes === AST_CACHE_MAX_SOURCE_BYTES, 'default budget in force');
+    assert(AST_CACHE_MAX_SOURCE_BYTES <= 4 * 1024 * 1024, 'budget must stay small: an AST costs ~100x its source');
+  });
+
   // --- P4b: File content cache size cap ---
 
   test('UTILS: _fileContentCache evicts when exceeding cap', () => {
