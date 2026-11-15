@@ -36,6 +36,21 @@ async function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  test('appendScanLedger: staticMs is recorded rounded when valid, omitted otherwise', () => {
+    const f = path.join(os.tmpdir(), `ledger-${Date.now()}-sm.jsonl`);
+    try {
+      const s = freshState(f);
+      s.appendScanLedger({ name: 'timed', outcome: 'clean', staticMs: 31234.6 });
+      s.appendScanLedger({ name: 'killed', outcome: 'static_timeout', source: 'static_timeout', staticMs: 45002 });
+      s.appendScanLedger({ name: 'untimed', outcome: 'dropped' });
+      s.appendScanLedger({ name: 'bad', outcome: 'clean', staticMs: -5 });
+      const byName = Object.fromEntries(s.loadScanLedger().map(r => [r.name, r]));
+      assert(byName.timed.staticMs === 31235, 'rounded value expected, got ' + byName.timed.staticMs);
+      assert(byName.killed.staticMs === 45002, 'static timeout carries its time');
+      assert(!('staticMs' in byName.untimed) && !('staticMs' in byName.bad), 'absent or invalid: no field');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   test('appendScanLedger: unknown outcome normalizes to clean; missing name is a no-op', () => {
     const f = path.join(os.tmpdir(), `ledger-${Date.now()}-b.jsonl`);
     try {

@@ -1136,6 +1136,9 @@ function appendScanLedger(e) {
       // Incompleteness contract (architecture lot 1): only written when the scan
       // was INCONCLUSIVE, same lean-ledger rule as isBurstExtra. No routing change.
       ...(e.analysisStatus === 'INCONCLUSIVE' ? { analysisStatus: 'INCONCLUSIVE' } : {}),
+      // Static scan time (worker spawn to result, the clock of the 45 s kill), for the scans
+      // that ran one. Lets a static-scan time bound be calibrated on production data.
+      ...(Number.isFinite(e.staticMs) && e.staticMs >= 0 ? { staticMs: Math.round(e.staticMs) } : {}),
       source: e.source || 'scan'
     };
     fs.appendFileSync(SCAN_LEDGER_FILE, JSON.stringify(entry) + '\n', 'utf8');
