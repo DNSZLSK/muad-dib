@@ -54,6 +54,7 @@ const { safeParse } = require('../shared/constants.js');
 const { findFiles } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { markIncomplete } = require('../shared/completeness.js');
+const { budgetOrder } = require('../shared/analyze-helper.js');
 
 const SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs'];
 const DECOY_EXT_RE = /\.(?:md|bak|tmp|txt|log)$/i;
@@ -122,48 +123,65 @@ function analyzeFile(content) {
 
   const evidence = { xorLoop: null, selfDelete: null, decoyWrite: null };
 
-  // Stack of loop nodes so we can attribute a XOR found at any descendant
-  // depth back to its enclosing loop.
-  const loopStack = [];
-
-  function pushLoop(loopNode, recurse, state) {
-    loopStack.push(loopNode);
-    try { recurse(loopNode.body, state); } finally { loopStack.pop(); }
-    // Walk the rest of the loop's children (init / test / update for ForStatement)
-    if (loopNode.type === 'ForStatement') {
-      if (loopNode.init) recurse(loopNode.init, state);
-      if (loopNode.test) recurse(loopNode.test, state);
-      if (loopNode.update) recurse(loopNode.update, state);
+  // Iterative pre-order walk (architecture lot 2): acorn-walk's recursive() spends stack
+  // frames per nesting level, so a 5 000-link member chain in the payload file overflowed
+  // the stack and the file's evidence was lost. Each entry carries whether it sits inside a
+  // loop body, so a XOR found at any depth is attributed to its enclosing loop. Same
+  // semantics and visit order as the former recursive walk (loop body first, then the
+  // other parts, which keep the enclosing context: the former walk visited a for statement's
+  // init / test / update after leaving the loop), so the evidence recorded is the same. The
+  // former walk never visited a while / do-while condition nor the left / right of
+  // for-in / for-of; they are now visited (enclosing context), so a self-delete or decoy
+  // write placed there is no longer missed.
+  const stack = [[ast, ast.type, false]];
+  const pushChildren = (node, type, inLoop) => {
+    const kids = [];
+    if (type === 'ForStatement') {
+      kids.push([node.body, true]);
+      for (const k of [node.init, node.test, node.update]) if (k) kids.push([k, inLoop]);
+    } else if (type === 'ForInStatement' || type === 'ForOfStatement') {
+      kids.push([node.body, true], [node.left, inLoop], [node.right, inLoop]);
+    } else if (type === 'WhileStatement' || type === 'DoWhileStatement') {
+      kids.push([node.body, true], [node.test, inLoop]);
+    } else {
+      const base = walk.base[type];
+      if (!base) return;
+      base(node, null, (child, _st, override) => { kids.push([child, inLoop, override]); });
     }
+    for (let i = kids.length - 1; i >= 0; i--) {
+      const [child, childInLoop, override] = kids[i];
+      if (child) stack.push([child, override || child.type, childInLoop]);
+    }
+  };
+
+  while (stack.length > 0) {
+    const [node, type, inLoop] = stack.pop();
+    // An override frame (Expression, Statement, Pattern...) only forwards to the node's own
+    // type: visit the node once, on its own frame.
+    if (type === node.type) visit(node, inLoop);
+    pushChildren(node, type, inLoop);
   }
 
-  walk.recursive(ast, null, {
-    ForStatement(node, _state, c) { pushLoop(node, c, _state); },
-    ForInStatement(node, _state, c) { pushLoop(node, c, _state); },
-    ForOfStatement(node, _state, c) { pushLoop(node, c, _state); },
-    WhileStatement(node, _state, c) { pushLoop(node, c, _state); },
-    DoWhileStatement(node, _state, c) { pushLoop(node, c, _state); },
-
-    BinaryExpression(node, _state, c) {
-      if (!evidence.xorLoop && node.operator === '^' && loopStack.length > 0) {
+  function visit(node, inLoop) {
+    if (node.type === 'BinaryExpression') {
+      if (!evidence.xorLoop && node.operator === '^' && inLoop) {
         if (literalDerivedOperand(node.left) || literalDerivedOperand(node.right)) {
           evidence.xorLoop = { line: node.loc && node.loc.start && node.loc.start.line };
         }
       }
-      c(node.left, _state);
-      c(node.right, _state);
-    },
-    AssignmentExpression(node, _state, c) {
+      return;
+    }
+    if (node.type === 'AssignmentExpression') {
       // Catch `out[i] ^= key[...]` style mutations
-      if (!evidence.xorLoop && node.operator === '^=' && loopStack.length > 0) {
+      if (!evidence.xorLoop && node.operator === '^=' && inLoop) {
         if (literalDerivedOperand(node.right)) {
           evidence.xorLoop = { line: node.loc && node.loc.start && node.loc.start.line };
         }
       }
-      c(node.left, _state);
-      c(node.right, _state);
-    },
-    CallExpression(node, _state, c) {
+      return;
+    }
+    if (node.type !== 'CallExpression') return;
+    {
       // Self-delete: fs.unlink / unlinkSync on __filename or self path hint
       if (!evidence.selfDelete && isFsCall(node, ['unlink', 'unlinkSync'])) {
         if (node.arguments && node.arguments.length > 0 && isSelfReference(node.arguments[0])) {
@@ -186,10 +204,8 @@ function analyzeFile(content) {
           evidence.decoyWrite = { line: node.loc && node.loc.start && node.loc.start.line };
         }
       }
-      c(node.callee, _state);
-      if (node.arguments) for (const arg of node.arguments) c(arg, _state);
     }
-  });
+  }
 
   const count = (evidence.xorLoop ? 1 : 0) + (evidence.selfDelete ? 1 : 0) + (evidence.decoyWrite ? 1 : 0);
   if (count === 0) return null;
@@ -212,7 +228,10 @@ async function scanAntiForensic(targetPath, options = {}) {
     : [];
   const allFiles = sourceFiles.concat(nodeModulesFiles);
 
-  for (const filePath of allFiles) {
+  // Executed files first, closest to an entry point first (budgetOrder), node_modules last;
+  // findings are reassembled in the original file order.
+  const perFile = new Map();
+  for (const filePath of budgetOrder(targetPath, sourceFiles).map(o => o.file).concat(nodeModulesFiles)) {
     let content;
     try {
       const stat = fs.statSync(filePath);
@@ -232,14 +251,14 @@ async function scanAntiForensic(targetPath, options = {}) {
     try {
       result = analyzeFile(content);
     } catch {
-      // A file that throws (stack overflow in the recursive loop walk) costs only that file.
+      // A file that throws costs only that file (the walk itself is iterative).
       fileErrors++;
       continue;
     }
     if (!result) continue;
     const rel = path.relative(targetPath, filePath);
     if (result.count >= 3) {
-      threats.push({
+      perFile.set(filePath, {
         type: 'anti_forensic_xor_autodelete',
         severity: 'CRITICAL',
         message: `Anti-forensic compound (XOR + self-delete + decoy write) in single file: ${rel}`,
@@ -247,7 +266,7 @@ async function scanAntiForensic(targetPath, options = {}) {
         evidence: JSON.stringify(result.evidence)
       });
     } else if (result.count === 2) {
-      threats.push({
+      perFile.set(filePath, {
         type: 'anti_forensic_partial',
         severity: 'HIGH',
         message: `Anti-forensic partial (2 of 3 patterns) in single file: ${rel}`,
@@ -256,6 +275,7 @@ async function scanAntiForensic(targetPath, options = {}) {
       });
     }
   }
+  for (const f of allFiles) if (perFile.has(f)) threats.push(perFile.get(f));
   if (fileErrors > 0) markIncomplete('scanAntiForensic', 'file-error', { observed: fileErrors });
   return threats;
 }

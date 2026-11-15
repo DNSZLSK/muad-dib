@@ -20,7 +20,7 @@
 'use strict';
 
 const { MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_FLOW_CANDIDATES, MAX_TAINT_DEPTH } = require('./constants.js');
-const { parseFile, resolveLocal, isLocalImport, toRel, isFileExists } = require('./parse-utils.js');
+const { parseFile, runWithWorkBudget, resolveLocal, isLocalImport, toRel, isFileExists } = require('./parse-utils.js');
 const { buildModuleGraph, extractLocalImports, tryResolveConcatRequire } = require('./build-graph.js');
 const { annotateTaintedExports } = require('./annotate-tainted.js');
 const { detectCrossFileFlows, filterFirstPartyNetworkFlows } = require('./detect-cross-file.js');
@@ -31,7 +31,7 @@ const { detectEventEmitterFlows } = require('./detect-event-flows.js');
 module.exports = {
   buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows,
   annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows,
-  resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists,
+  resolveLocal, extractLocalImports, parseFile, runWithWorkBudget, isLocalImport, toRel, isFileExists,
   tryResolveConcatRequire,
   MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_FLOW_CANDIDATES, MAX_TAINT_DEPTH
 };

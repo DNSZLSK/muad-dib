@@ -210,6 +210,73 @@ async function runScannerBudgetTests() {
     } finally { resetCompleteness(); cleanup(dir); }
   });
 
+  // --- budget order: BFS depth from the entry points, in every budgeted scanner ----------
+
+  test('BUDGET: executed files are processed closest to an entry point first (BFS depth)', () => {
+    // Directory order is a-deep, b-other, m-mid, z-main; the require chain is the reverse.
+    const dir = makePkg({
+      'z-main.js': "require('./m-mid.js');\n",
+      'm-mid.js': "require('./a-deep.js');\n",
+      'a-deep.js': 'module.exports = 1;\n',
+      'b-other.js': 'module.exports = 2;\n'
+    }, { main: 'z-main.js' });
+    try {
+      resetCompleteness();
+      const analyzed = [];
+      analyzeWithDeobfuscation(dir, (content, file) => { analyzed.push(path.basename(file)); return []; }, { component: 'probeScanner' });
+      assert(analyzed.join(',') === 'z-main.js,m-mid.js,a-deep.js,b-other.js', 'BFS order expected: ' + analyzed.join(','));
+    } finally { resetCompleteness(); cleanup(dir); }
+  });
+
+  // A deterministic high-entropy literal (64 distinct characters, not the base64 alphabet order).
+  const HIGH_ENTROPY = Array.from({ length: 64 }, (_, i) =>
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'[(i * 37 + 11) % 64]).join('');
+
+  function decoyPkg(payloadFile, decoyBody) {
+    const files = { 'z-main.js': "require('./z-payload.js');\n", 'z-payload.js': payloadFile };
+    for (let i = 0; i < 5; i++) files[`a-decoy${i}.js`] = decoyBody + '// ' + 'x'.repeat(2000) + '\n';
+    return makePkg(files, { main: 'z-main.js' });
+  }
+
+  test('BUDGET: scanEntropy spends its budget on executed files first, decoys cannot push the payload out', () => {
+    const { scanEntropy } = require('../../src/scanner/entropy');
+    const dir = decoyPkg(`module.exports = '${HIGH_ENTROPY}';\n`, 'module.exports = 0;\n');
+    try {
+      resetCompleteness();
+      const all = scanEntropy(dir, {});
+      assert(all.some(t => t.type === 'high_entropy_string' && t.file === 'z-payload.js'), 'fixture: the payload string must fire without a budget: ' + JSON.stringify(all));
+      resetCompleteness();
+      const t = scanEntropy(dir, { byteBudget: 200 });
+      assert(t.some(x => x.type === 'high_entropy_string' && x.file === 'z-payload.js'), 'payload must be analyzed before the decoys: ' + JSON.stringify(t));
+      assert(getIncomplete().some(e => e.component === 'scanEntropy' && e.reason === 'work-budget'), 'work-budget expected');
+    } finally { resetCompleteness(); cleanup(dir); }
+  });
+
+  await asyncTest('BUDGET: scanAntiForensic spends its budget on executed files first, decoys cannot push the payload out', async () => {
+    const { scanAntiForensic } = require('../../src/scanner/anti-forensic');
+    const payload = 'const fs = require("fs"); const K = "kk";\n' +
+      'for (let i = 0; i < 9; i++) o[i] = P[i] ^ K.charCodeAt(0);\n' +
+      'fs.writeFileSync("package.md", "#"); fs.unlinkSync(__filename);\n';
+    // The decoys pass the scanner's pre-filter (a `^`), so they would be parsed and charged.
+    const dir = decoyPkg(payload, 'var q = a ^ b;\n');
+    try {
+      resetCompleteness();
+      const t = await scanAntiForensic(dir, { byteBudget: 300 });
+      assert(t.some(x => x.type === 'anti_forensic_xor_autodelete' && x.file === 'z-payload.js'), 'payload must be analyzed before the decoys: ' + JSON.stringify(t));
+      assert(getIncomplete().some(e => e.component === 'scanAntiForensic' && e.reason === 'work-budget'), 'work-budget expected');
+    } finally { resetCompleteness(); cleanup(dir); }
+  });
+
+  test('BUDGET: scanEntropy findings keep the original file order without a budget (negative)', () => {
+    const { scanEntropy } = require('../../src/scanner/entropy');
+    const dir = makePkg({ 'z-main.js': `module.exports = '${HIGH_ENTROPY}';\n`, 'a-lib.js': `module.exports = '${HIGH_ENTROPY}';\n` }, { main: 'z-main.js' });
+    try {
+      resetCompleteness();
+      const files = scanEntropy(dir, {}).filter(x => x.type === 'high_entropy_string').map(x => x.file);
+      assert(files.join(',') === 'a-lib.js,z-main.js', 'original order expected: ' + files.join(','));
+    } finally { resetCompleteness(); cleanup(dir); }
+  });
+
   await asyncTest('BUDGET: MUADDIB_SCANNER_WORK_BUDGET=0 makes the heavy scanners stop and the scan INCONCLUSIVE', async () => {
     const dir = makePkg({ 'index.js': PAYLOAD });
     try {
