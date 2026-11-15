@@ -69,6 +69,56 @@ function parseWorkflowSteps(content) {
   return { scripts, actionInputs };
 }
 
+// What a LOCAL action (`uses: ./path`, resolved from the repository root like GitHub does)
+// does with one of its inputs, read from its own action.yml / action.yaml:
+//   'shell'   a composite step's run: (or github-script script:) expands ${{ inputs.<name> }}
+//   'forward' it only passes the input on (a nested action's with:, docker args): unknown
+//   'data'    a node action (inputs arrive as INPUT_* variables) or no expansion at all
+//   'unknown' action file missing, unreadable, unparsable, or outside the scanned tree
+function localActionUse(targetPath, uses, input) {
+  const root = path.resolve(targetPath);
+  const dir = path.resolve(root, uses.replace(/@.*$/, ''));
+  const rel = path.relative(root, dir);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return 'unknown';
+  let content = null;
+  for (const name of ['action.yml', 'action.yaml']) {
+    const f = path.join(dir, name);
+    try {
+      const st = fs.lstatSync(f);
+      if (!st.isFile() || st.size > getMaxFileSize()) continue;
+      content = fs.readFileSync(f, 'utf8');
+      break;
+    } catch { /* try the next name */ }
+  }
+  if (content === null) return 'unknown';
+  let doc;
+  try { doc = yaml.load(content, { schema: yaml.JSON_SCHEMA }); } catch { return 'unknown'; }
+  if (!doc || typeof doc !== 'object' || !doc.runs || typeof doc.runs !== 'object') return 'unknown';
+  const esc = input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const ref = new RegExp(`\\$\\{\\{[^}]*\\binputs(?:\\.${esc}\\b|\\[\\s*['"]${esc}['"]\\s*\\])`);
+  const using = String(doc.runs.using || '').toLowerCase();
+  if (using === 'composite') {
+    const steps = Array.isArray(doc.runs.steps) ? doc.runs.steps : [];
+    let forwarded = false;
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue;
+      if (typeof step.run === 'string' && ref.test(step.run)) return 'shell';
+      if (step.with && typeof step.with === 'object') {
+        if (typeof step.uses === 'string' && /^actions\/github-script@/i.test(step.uses) &&
+            typeof step.with.script === 'string' && ref.test(step.with.script)) return 'shell';
+        if (Object.values(step.with).some(v => typeof v === 'string' && ref.test(v))) forwarded = true;
+      }
+    }
+    return forwarded ? 'forward' : 'data';
+  }
+  if (using === 'docker') {
+    const args = Array.isArray(doc.runs.args) ? doc.runs.args : [];
+    return args.some(a => typeof a === 'string' && ref.test(a)) ? 'forward' : 'data';
+  }
+  if (using.startsWith('node')) return 'data';
+  return 'unknown';
+}
+
 function scanGitHubActions(targetPath) {
   const threats = [];
 
@@ -166,13 +216,30 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
 
       // GHA-007: the same attacker-controlled context handed as an input to an action other
       // than actions/* and github/*. Injectable only if that action expands the input into its
-      // own shell, which cannot be seen from the workflow: MEDIUM, a separate type, and NOT an
+      // own shell. A local action's action.yml is in the scanned tree and is read: expansion
+      // in a run: is a real injection (workflow_injection), a node action or no expansion is
+      // data (nothing reported). A third-party action, or a local one that only forwards the
+      // input or cannot be read, cannot be decided: MEDIUM, a separate type, and NOT an
       // injection for the GHA-006 compound (which would make it CRITICAL on a maybe).
       if (parsed !== null) {
         const seen = new Set();
         for (const { uses, input, value } of parsed.actionInputs) {
           if (seen.has(uses + '|' + input) || !injectionPatterns.some(p => p.regex.test(value))) continue;
           seen.add(uses + '|' + input);
+          if (uses.startsWith('./')) {
+            const use = localActionUse(targetPath, uses, input);
+            if (use === 'data') continue;
+            if (use === 'shell') {
+              fileHasInjection = true;
+              threats.push({
+                type: 'workflow_injection',
+                severity: 'HIGH',
+                message: `Potential injection: attacker-controlled GitHub event context passed as input "${input}" to local action ${uses}, which expands it in a run: step`,
+                file: relFile
+              });
+              continue;
+            }
+          }
           threats.push({
             type: 'workflow_context_to_action_input',
             severity: 'MEDIUM',
