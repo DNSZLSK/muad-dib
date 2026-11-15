@@ -181,7 +181,7 @@ muaddib scrape                     # Full IOC refresh (~5min)
 muaddib diff HEAD~1                # Compare threats with previous commit
 muaddib init-hooks                 # Pre-commit hooks (husky/pre-commit/git)
 muaddib scan . --breakdown         # Explainable score decomposition
-muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11.48)
+muaddib replay                     # Ground-truth replay, non-regression (90/94 at v2.11.48)
 ```
 
 ---
@@ -329,17 +329,19 @@ repos:
 
 ## Evaluation
 
-Last measured **v2.11.48** (2026-05-26), **rules-only** (the ML classifier is inactive — see below). Ground truth: 94 in-scope real-world attacks + 200 random npm + 124 PyPI + 107 adversarial/holdout.
+Last measured **v2.11.48** (2026-05-26), **rules-only** (the ML classifier is inactive - see below). Ground truth: 94 in-scope attack samples (mostly reconstructions, see below) + 200 random npm + 124 PyPI + 107 adversarial/holdout.
 
 | Metric | Result |
 |--------|--------|
-| Detection rate (TPR@3) | **95.74%** (90/94) |
-| Alert rate (TPR@20) | **88.30%** (83/94) |
+| Ground-truth replay, score >= 3 (TPR@3) | **95.74%** (90/94) |
+| Ground-truth replay, score >= 20 (TPR@20) | **88.30%** (83/94) |
 | FPR — curated npm (548) | **1.10%** (6/545) |
 | FPR — random npm (200) | **2.50%** (5/200) |
 | FPR — PyPI (132) | **9.68%** (12/124) |
 | ADR — adversarial + holdout | **96.26%** (103/107) |
 | Wild TPR (Datadog 17K) | **92.8%** (13,538/14,587) |
+
+**What the ground-truth rows measure.** The 99 ground-truth samples (`tests/ground-truth/attacks.json`) are 16 synthetic fixtures, 69 reconstructions of documented attacks and 14 samples derived from real 2026 packages (2 of them marked as reconstructions). They are small (median 3 files and 2.6 KB, largest 81 KB) and were written alongside the rules that detect them. Replaying them shows that known attack shapes are still detected after a change: it is a non-regression suite, not a measure of detection on real published malware, which comes with dilution, decoy files, the file cap and realistic reachability. The Datadog row is measured on real samples; operational coverage against the GHSA malware feed is described in the Evaluation Methodology.
 
 **ML classifier: inactive.** An XGBoost model lives in `src/ml/` but is never wired into `muaddib scan`, and runs LOG-ONLY in the monitor since 2026-04-08 (the trained model collapsed, pending retrain). All numbers above are rules-only.
 
@@ -380,7 +382,7 @@ npm test
 - **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->171<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
-- **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
+- **Ground-truth replay** - non-regression suite of attack samples, mostly reconstructions (96 at v2.11.48: 95.74% at score >= 3, 88.30% at score >= 20, on 94 in-scope)
 - **False positive validation** (v2.11.48 measure) - 1.10% FPR rules (6/545 scanned), 2.50% on 200 random, 9.68% on 124/132 PyPI (first honest measurement post-Track-D download fix). ML classifier currently inactive — see Evaluation Metrics → ML Classifier.
 
 ---
