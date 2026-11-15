@@ -44,6 +44,11 @@ if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
   if (!process.env.MUADDIB_DATA_DIR) {
     process.env.MUADDIB_DATA_DIR = path.join(os.tmpdir(), `muaddib-test-data-${process.pid}`);
   }
+  // The tarball archive (suspects >= 20, evaluation random sample and near misses) defaults
+  // to /opt/muaddib/archive: a test that drives scanPackage must never write there.
+  if (!process.env.MUADDIB_ARCHIVE_DIR) {
+    process.env.MUADDIB_ARCHIVE_DIR = path.join(os.tmpdir(), `muaddib-test-archive-${process.pid}`);
+  }
 }
 
 const { getCounters } = require('./test-utils');
@@ -148,6 +153,7 @@ const { runFprBandGatesTests } = require('./unit/fpr-band-gates.test');
 const { runSdkDestinationTests } = require('./unit/sdk-destination.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
+const { runEvalCaptureTests } = require('./unit/eval-capture.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
 const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
@@ -460,6 +466,7 @@ async function timed(name, fn) {
 
   // Tarball archive tests
   await timed('tarball-archive', runTarballArchiveTests);
+  await timed('eval-capture', runEvalCaptureTests);
   await timed('scan-ledger', runScanLedgerTests);
   await timed('shadow', runShadowTests);
   await timed('spill', runSpillTests);
