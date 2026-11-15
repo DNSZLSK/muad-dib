@@ -412,8 +412,12 @@ class Spinner {
  * Calls callback(file, content) for each readable file under MAX_FILE_SIZE.
  * File contents are cached in _fileContentCache for reuse across scanners.
  */
-function forEachSafeFile(files, callback) {
+function forEachSafeFile(files, callback, options = {}) {
+  // shouldStop: checked before each file, so a scanner past its time budget stops without
+  // reading the remaining files (architecture lot 2).
+  const shouldStop = typeof options.shouldStop === 'function' ? options.shouldStop : null;
   for (const file of files) {
+    if (shouldStop && shouldStop()) break;
     // Check content cache first
     const cached = _fileContentCache.get(file);
     if (cached !== undefined) {

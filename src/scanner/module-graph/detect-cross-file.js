@@ -296,18 +296,23 @@ function findFirstTaintedArg(args, taintMap) {
  * Handles: fn(tainted), fn(a, fn2(tainted)), fn(tainted).method()
  */
 function findFirstTaintedArgInExpr(node, taintMap) {
-  if (!node) return null;
-  if (node.type === 'Identifier' && taintMap[node.name] && !node.name.startsWith('__module__')) {
-    return node.name;
-  }
-  if (node.type === 'CallExpression') {
-    const fromArgs = findFirstTaintedArg(node.arguments, taintMap);
-    if (fromArgs) return fromArgs;
-    // Check callee for chained calls: fn(x).method()
-    return findFirstTaintedArgInExpr(node.callee, taintMap);
-  }
-  if (node.type === 'MemberExpression') {
-    return findFirstTaintedArgInExpr(node.object, taintMap);
+  // Iterative along the callee/object spine: the recursive version overflowed the stack on
+  // a member chain of a few thousand links (15 KB of `.a.a.a`), which aborted the whole
+  // event-emitter step of the module graph for every file of the package.
+  while (node) {
+    if (node.type === 'Identifier' && taintMap[node.name] && !node.name.startsWith('__module__')) {
+      return node.name;
+    }
+    if (node.type === 'CallExpression') {
+      const fromArgs = findFirstTaintedArg(node.arguments, taintMap);
+      if (fromArgs) return fromArgs;
+      // Check callee for chained calls: fn(x).method()
+      node = node.callee;
+    } else if (node.type === 'MemberExpression') {
+      node = node.object;
+    } else {
+      return null;
+    }
   }
   return null;
 }

@@ -42,6 +42,11 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 // Below this many npm IOC entries the database is considered absent: the YAML built-ins alone
 // hold a few dozen; a full database holds about 250 000.
 const MIN_LOADED_IOC_PACKAGES = 1000;
+// Per heavy scanner, in source characters analyzed (architecture lot 2). Measured 2026-11-15
+// on 50 npm packages (40 random + the 10 largest of a 395-package random sample): at most
+// 16.8 MB of analyzable source (vuetify, pro-design-vue, 2 000-file cap reached), 0.7 to
+// 3.9 s per MB for AST + dataflow. 32 Mi is about twice the largest benign package.
+const DEFAULT_SCANNER_WORK_BUDGET = 32 * 1024 * 1024;
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
@@ -345,25 +350,37 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // Running them via yieldThen ensures the spinner animates between each scanner.
   // Uses Promise.allSettled so one scanner crash doesn't kill the entire scan.
   //
-  // Per-scanner timeout (ANSSI audit m2): prevents DoS via adversarial packages
-  // with deep nesting or pathological AST structures. Heavy scanners (AST, dataflow,
-  // entropy) get individual timeouts; lightweight scanners run without timeout.
-  const SCANNER_TIMEOUT_MS = 45000; // 45s per heavy scanner
+  // Per-scanner work budget (ANSSI audit m2, architecture lot 2): prevents DoS via
+  // adversarial packages with many large files. Heavy scanners (AST, dataflow, entropy,
+  // anti-forensic) are synchronous, so a timer can never interrupt them: each one counts the
+  // source characters it analyzes and, past the budget, stops before the next file, returns
+  // the findings already made (executed files first) and marks itself INCONCLUSIVE. A count,
+  // not a clock, so the verdict does not depend on the machine. The hard wall-clock bound is
+  // one level up: hard-timeout.js for the CLI, the terminated scan worker for the monitor.
+  // Strict parse, as for the graph budget.
+  const rawWorkBudget = process.env.MUADDIB_SCANNER_WORK_BUDGET;
+  const SCANNER_WORK_BUDGET = typeof rawWorkBudget === 'string' && /^\d+$/.test(rawWorkBudget.trim())
+    ? parseInt(rawWorkBudget.trim(), 10) : DEFAULT_SCANNER_WORK_BUDGET;
+  const SCANNER_TIMEOUT_MS = 45000; // scanTrustedDepDiff only (registry I/O)
 
+  function withBudget(fn) {
+    return yieldThen(() => fn({ byteBudget: SCANNER_WORK_BUDGET }));
+  }
+
+  // Real timer, for the one scanner that awaits I/O (registry fetches). Started when the
+  // scanner starts, not when the batch is built: the synchronous scanners before it would
+  // otherwise consume its budget.
   function withTimeout(fn, name) {
-    return new Promise((resolve, reject) => {
+    return yieldThen(() => new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        // Incompleteness contract: a timed-out scanner is never reported as a
-        // clean result. The scanners are synchronous today, so this timer cannot
-        // fire before they return (architecture lot 2 makes it effective); the
-        // contract is fixed here so that it holds once it can.
+        // Incompleteness contract: a timed-out scanner is never reported as a clean result.
         debugLog(`[TIMEOUT] Scanner ${name} exceeded ${SCANNER_TIMEOUT_MS / 1000}s`);
         markIncomplete(name, 'timeout', { limit: SCANNER_TIMEOUT_MS });
         resolve([]);
       }, SCANNER_TIMEOUT_MS);
-      yieldThen(fn).then(result => { clearTimeout(timer); resolve(result); })
+      Promise.resolve().then(fn).then(result => { clearTimeout(timer); resolve(result); })
         .catch(err => { clearTimeout(timer); reject(err); });
-    });
+    }));
   }
 
   const isQuick = options.scanMode === 'quick';
@@ -379,19 +396,19 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const settledResults = await Promise.allSettled([
     ifEnabled('scanPackageJson', () => yieldThen(() => scanPackageJson(targetPath))),
     ifEnabled('scanShellScripts', () => yieldThen(() => scanShellScripts(targetPath))),
-    ifEnabled('analyzeAST', () => withTimeout(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeAST')),
+    ifEnabled('analyzeAST', () => withBudget(budget => analyzeAST(targetPath, { deobfuscate: deobfuscateFn, ...budget }))),
     ifEnabled('detectObfuscation', () => yieldThen(() => detectObfuscation(targetPath))),
     ifEnabled('scanDependencies', () => yieldThen(() => scanDependencies(targetPath))),
     ifEnabled('scanHashes', () => yieldThen(() => scanHashes(targetPath))),
-    ifEnabled('analyzeDataFlow', () => withTimeout(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeDataFlow')),
+    ifEnabled('analyzeDataFlow', () => withBudget(budget => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn, ...budget }))),
     ifEnabled('scanTyposquatting', () => yieldThen(() => scanTyposquatting(targetPath))),
     ifEnabled('scanGitHubActions', () => yieldThen(() => scanGitHubActions(targetPath))),
     ifEnabled('matchPythonIOCs', () => yieldThen(() => matchPythonIOCs(pythonDeps, targetPath))),
     ifEnabled('checkPyPITyposquatting', () => yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath))),
-    ifEnabled('scanEntropy', () => withTimeout(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }), 'scanEntropy')),
+    ifEnabled('scanEntropy', () => withBudget(budget => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined, ...budget }))),
     ifEnabled('scanAIConfig', () => yieldThen(() => scanAIConfig(targetPath))),
     ifEnabled('scanIocStrings', () => yieldThen(() => scanIocStrings(targetPath))),
-    ifEnabled('scanAntiForensic', () => withTimeout(() => scanAntiForensic(targetPath), 'scanAntiForensic')),
+    ifEnabled('scanAntiForensic', () => withBudget(budget => scanAntiForensic(targetPath, budget))),
     ifEnabled('scanStubPackage', () => yieldThen(() => scanStubPackage(targetPath))),
     ifEnabled('scanMonorepo', () => yieldThen(() => scanMonorepo(targetPath))),
     // Opt-in scanner — short-circuits to [] unless options.trustedDepDiff or

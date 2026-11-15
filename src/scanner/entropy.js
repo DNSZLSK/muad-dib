@@ -19,6 +19,7 @@
 
 const path = require('path');
 const { findFiles, forEachSafeFile } = require('../utils.js');
+const { markIncomplete } = require('../shared/completeness.js');
 
 const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__tests__', '__test__', 'dist', 'build'];
 
@@ -216,7 +217,16 @@ function scanEntropy(targetPath, options = {}) {
   const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: ENTROPY_EXCLUDED_DIRS });
 
   const safeFiles = files.filter(f => !shouldSkipFile(f));
+  // Work budget in source characters (architecture lot 2), deterministic: see analyze-helper.js.
+  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
+  let analyzedChars = 0;
+  let overBudget = false;
   forEachSafeFile(safeFiles, (file, content) => {
+    if (byteBudget !== null && analyzedChars >= byteBudget) {
+      overBudget = true;
+      return;
+    }
+    analyzedChars += content.length;
     // Skip files containing source maps (legitimate compiled output)
     if (hasSourceMap(content)) return;
 
@@ -287,8 +297,9 @@ function scanEntropy(targetPath, options = {}) {
         file: relativePath
       });
     }
-  });
+  }, { shouldStop: () => overBudget });
 
+  if (overBudget) markIncomplete('scanEntropy', 'work-budget', { limit: byteBudget, observed: analyzedChars });
   return threats;
 }
 

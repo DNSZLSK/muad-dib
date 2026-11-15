@@ -19,7 +19,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const walk = require('acorn-walk');
+// Stack-safe walker with acorn-walk's exact semantics (deep member/call chains, lot 2).
+const walk = require('../shared/safe-walk.js');
 const { getCallName } = require('../utils.js');
 const { safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
@@ -273,7 +274,9 @@ function buildTaintMap(ast) {
 
 async function analyzeDataFlow(targetPath, options = {}) {
   return analyzeWithDeobfuscation(targetPath, analyzeFile, {
-    deobfuscate: options.deobfuscate
+    deobfuscate: options.deobfuscate,
+    component: 'analyzeDataFlow',
+    byteBudget: options.byteBudget
   });
 }
 

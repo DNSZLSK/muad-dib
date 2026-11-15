@@ -53,6 +53,7 @@ const walk = require('acorn-walk');
 const { safeParse } = require('../shared/constants.js');
 const { findFiles } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
+const { markIncomplete } = require('../shared/completeness.js');
 
 const SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs'];
 const DECOY_EXT_RE = /\.(?:md|bak|tmp|txt|log)$/i;
@@ -195,9 +196,14 @@ function analyzeFile(content) {
   return { evidence, count };
 }
 
-async function scanAntiForensic(targetPath) {
+async function scanAntiForensic(targetPath, options = {}) {
   const threats = [];
   if (!fs.existsSync(targetPath)) return threats;
+  // Work budget in source characters (architecture lot 2), deterministic: see analyze-helper.js.
+  // Only the files that pass the cheap pre-filter below are parsed, so only they count.
+  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
+  let analyzedChars = 0;
+  let fileErrors = 0;
 
   const sourceFiles = findFiles(targetPath, { extensions: SCAN_EXTENSIONS });
   const nodeModulesPath = path.join(targetPath, 'node_modules');
@@ -217,7 +223,19 @@ async function scanAntiForensic(targetPath) {
     // Cheap pre-filter: skip files that have no `^` operator and no fs.unlink/rename
     // call. Avoids parsing benign minified bundles.
     if (!/[^=!<>]\^[^=]/.test(content) && !/\b(?:unlink|rename)(?:Sync)?\b/.test(content)) continue;
-    const result = analyzeFile(content);
+    if (byteBudget !== null && analyzedChars >= byteBudget) {
+      markIncomplete('scanAntiForensic', 'work-budget', { limit: byteBudget, observed: analyzedChars });
+      break;
+    }
+    analyzedChars += content.length;
+    let result;
+    try {
+      result = analyzeFile(content);
+    } catch {
+      // A file that throws (stack overflow in the recursive loop walk) costs only that file.
+      fileErrors++;
+      continue;
+    }
     if (!result) continue;
     const rel = path.relative(targetPath, filePath);
     if (result.count >= 3) {
@@ -238,6 +256,7 @@ async function scanAntiForensic(targetPath) {
       });
     }
   }
+  if (fileErrors > 0) markIncomplete('scanAntiForensic', 'file-error', { observed: fileErrors });
   return threats;
 }
 

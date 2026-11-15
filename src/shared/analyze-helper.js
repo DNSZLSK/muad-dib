@@ -20,6 +20,7 @@
 const path = require('path');
 const { isDevFile, findJsFiles, forEachSafeFile } = require('../utils.js');
 const { looksBinaryString } = require('./binary-sniff.js');
+const { markIncomplete } = require('./completeness.js');
 
 // Files reachable from the package entry points (main, bin, exports, module, browser,
 // lifecycle targets, and what they require or spawn) are EXECUTED code, so the dev-file
@@ -66,15 +67,38 @@ function executedFiles(targetPath) {
  * @returns {Array} Combined threats
  */
 function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
-  const threats = [];
   const files = findJsFiles(targetPath);
   const executed = executedFiles(targetPath);
+  const component = options.component || 'analyzeWithDeobfuscation';
+  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
 
-  forEachSafeFile(files, (file, content) => {
+  // Work budget (architecture lot 2). The scanners are synchronous, so a timer cannot
+  // interrupt them, and a clock would make the verdict depend on the machine: the budget is
+  // the number of source characters analyzed, checked before each file, so a package stops
+  // at the same file everywhere. Executed files are analyzed first, so padding the package
+  // with large decoy files cannot push the code that runs past the budget. Findings are
+  // reassembled in the original file order, so the output does not depend on the
+  // processing order. The hard wall-clock bound is one level up (hard-timeout.js, monitor
+  // worker).
+  const order = files.map((file, index) => ({ file, index, rel: path.relative(targetPath, file).replace(/\\/g, '/') }));
+  order.sort((a, b) => (executed.has(a.rel) ? 0 : 1) - (executed.has(b.rel) ? 0 : 1) || a.index - b.index);
+  const indexOf = new Map(order.map(o => [o.file, o.index]));
+  const perFile = new Array(files.length);
+  let analyzedChars = 0;
+  let overBudget = false;
+  let fileErrors = 0;
+  // Once a file that would have been analyzed is skipped, the remaining files are not even read.
+  const shouldStop = () => overBudget;
+
+  forEachSafeFile(order.map(o => o.file), (file, content) => {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
 
     if (options.excludedFiles && options.excludedFiles.includes(relativePath)) return;
     if (options.skipDevFiles !== false && isDevFile(relativePath) && !executed.has(relativePath)) return;
+    if (byteBudget !== null && analyzedChars >= byteBudget) {
+      overBudget = true;
+      return;
+    }
 
     // .d.ts files: strip TypeScript declaration syntax before JS parsing.
     // Legitimate .d.ts files contain only type declarations (no executable code).
@@ -92,32 +116,61 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
     }
 
     // Ingestion guard: a source-extension file whose bytes are actually binary (a payload
-    // carrier disguised as source) is not JS — skip the parse instead of handing acorn
+    // carrier disguised as source) is not JS - skip the parse instead of handing acorn
     // megabytes of binary that yield no AST and burn the parse budget. binary-source.js
     // reports the finding (it also reaches dist/ where this shared path does not).
     if (looksBinaryString(effectiveContent)) return;
+    analyzedChars += effectiveContent.length;
 
-    // Analyze original code first (preserves obfuscation-detection rules)
-    const fileThreats = analyzeFileFn(effectiveContent, file, targetPath);
-    threats.push(...fileThreats);
+    // One file that throws (measured: a 7.5 MB member-expression chain overflows the stack
+    // in the walk) used to reject the whole scanner and drop the findings of every other
+    // file. It now costs only that file, and the scan is INCONCLUSIVE.
+    let fileThreats;
+    try {
+      // Analyze original code first (preserves obfuscation-detection rules)
+      fileThreats = analyzeFileFn(effectiveContent, file, targetPath);
+    } catch {
+      fileErrors++;
+      return;
+    }
+    const out = fileThreats.slice();
 
     // Also analyze deobfuscated code for additional findings hidden by obfuscation
     if (typeof options.deobfuscate === 'function') {
+      let result = null;
       try {
-        const result = options.deobfuscate(effectiveContent);
-        if (result.transforms.length > 0) {
-          const deobThreats = analyzeFileFn(result.code, file, targetPath);
+        result = options.deobfuscate(effectiveContent);
+      } catch { /* deobfuscation failed - skip */ }
+      if (result && result.transforms.length > 0) {
+        let deobThreats = null;
+        try {
+          deobThreats = analyzeFileFn(result.code, file, targetPath);
+        } catch {
+          fileErrors++;
+        }
+        if (deobThreats) {
           const existingKeys = new Set(fileThreats.map(t => `${t.type}::${t.message}`));
           for (const dt of deobThreats) {
             if (!existingKeys.has(`${dt.type}::${dt.message}`)) {
-              threats.push(dt);
+              out.push(dt);
             }
           }
         }
-      } catch { /* deobfuscation failed — skip */ }
+      }
     }
-  });
+    perFile[indexOf.get(file)] = out;
+  }, { shouldStop });
 
+  if (overBudget) {
+    markIncomplete(component, 'work-budget', { limit: byteBudget, observed: analyzedChars });
+  }
+  if (fileErrors > 0) {
+    markIncomplete(component, 'file-error', { observed: fileErrors });
+  }
+  const threats = [];
+  for (const fileThreats of perFile) {
+    if (fileThreats) threats.push(...fileThreats);
+  }
   return threats;
 }
 
