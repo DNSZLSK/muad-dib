@@ -31,12 +31,37 @@ const PKG_VERSION = (() => {
 })();
 
 /**
+ * Hooks directory of the repository rooted at targetPath, or null if targetPath is not the
+ * root of a git checkout. In a linked worktree or a submodule, `.git` is a file
+ * (`gitdir: ...`), not a directory, and the hooks live in the common git directory: asking
+ * git (`rev-parse --git-path hooks`) resolves both, and `core.hooksPath` too. Only a
+ * checkout root counts (its own `.git` entry), so a subdirectory of a repository never
+ * installs into the parent's hooks. Falls back to `.git/hooks` when git cannot run.
+ */
+function resolveGitHooksDir(targetPath) {
+  if (!fs.existsSync(path.join(targetPath, '.git'))) return null;
+  try {
+    const [top, hooks] = execFileSync('git', ['rev-parse', '--show-toplevel', '--git-path', 'hooks'], {
+      cwd: targetPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000
+    }).trim().split(/\r?\n/);
+    // An invalid `.git` makes git keep searching upwards: only trust an answer about
+    // targetPath itself, never about a parent repository.
+    const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    if (top && hooks && same(fs.realpathSync(top), fs.realpathSync(targetPath))) {
+      return path.resolve(targetPath, hooks);
+    }
+  } catch { /* git missing or not a repository: plain layout below */ }
+  return path.join(targetPath, '.git', 'hooks');
+}
+
+/**
  * Detect which hook system is available
  */
 function detectHookSystem(targetPath) {
   const hasHusky = fs.existsSync(path.join(targetPath, '.husky'));
   const hasPreCommitConfig = fs.existsSync(path.join(targetPath, '.pre-commit-config.yaml'));
-  const hasGitHooks = fs.existsSync(path.join(targetPath, '.git', 'hooks'));
+  const hooksDir = resolveGitHooksDir(targetPath);
+  const hasGitHooks = hooksDir !== null && fs.existsSync(hooksDir);
 
   return {
     husky: hasHusky,
@@ -218,9 +243,9 @@ async function initPreCommit(targetPath, mode) {
  * Initialize native git hooks
  */
 async function initGitHook(targetPath, mode) {
-  const gitHooksDir = path.join(targetPath, '.git', 'hooks');
+  const gitHooksDir = resolveGitHooksDir(targetPath);
 
-  if (!fs.existsSync(gitHooksDir)) {
+  if (!gitHooksDir || !fs.existsSync(gitHooksDir)) {
     throw new Error('Not a git repository. Run: git init');
   }
 
@@ -280,8 +305,9 @@ async function removeHooks(targetPath) {
   }
 
   // Remove git hook
-  const gitPreCommit = path.join(resolvedPath, '.git', 'hooks', 'pre-commit');
-  if (fs.existsSync(gitPreCommit)) {
+  const hooksDir = resolveGitHooksDir(resolvedPath);
+  const gitPreCommit = hooksDir ? path.join(hooksDir, 'pre-commit') : null;
+  if (gitPreCommit && fs.existsSync(gitPreCommit)) {
     const content = fs.readFileSync(gitPreCommit, 'utf8');
     if (content.includes('muaddib') || content.includes('MUADDIB')) {
       fs.unlinkSync(gitPreCommit);
@@ -293,4 +319,4 @@ async function removeHooks(targetPath) {
   return true;
 }
 
-module.exports = { initHooks, removeHooks, detectHookSystem };
+module.exports = { initHooks, removeHooks, detectHookSystem, resolveGitHooksDir };

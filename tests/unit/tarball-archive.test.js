@@ -6,6 +6,27 @@ const os = require('os');
 const crypto = require('crypto');
 const { test, asyncTest, assert } = require('../test-utils');
 
+// The archive gates downloads and purges on the free space of its volume (5 GB floor). Tests
+// that are not about that gate fix the free space instead of reading the host's: in WSL /tmp
+// is a 2.9 GB tmpfs, which made two of them exercise the low-space path and fail.
+const AMPLE = { bavail: 1e9, bsize: 4096 }; // ~3.7 TB free
+const NONE = { bavail: 0, bsize: 4096 };
+function withFreeSpace(stat, fn) {
+  const real = fs.statfsSync;
+  fs.statfsSync = () => stat;
+  let restoreNow = true;
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') {
+      restoreNow = false;
+      return r.finally(() => { fs.statfsSync = real; });
+    }
+    return r;
+  } finally {
+    if (restoreNow) fs.statfsSync = real;
+  }
+}
+
 async function runTarballArchiveTests() {
   console.log('\n=== Tarball Archive Tests ===\n');
 
@@ -204,13 +225,14 @@ async function runTarballArchiveTests() {
 
     let threw = false;
     try {
-      // This will fail because it's not a real URL — but it should not throw
-      // (the caller wraps in .catch, but the function itself should propagate the error,
-      // which is then caught by the fire-and-forget .catch in queue.js)
-      await mod.archiveSuspectTarball('bad-pkg', '1.0.0', 'https://registry.npmjs.org/bad-pkg/-/bad-pkg-1.0.0.tgz', {
+      // A closed local port: the download fails without depending on the network or on what
+      // the registry serves. The function propagates the error, which the fire-and-forget
+      // .catch in queue.js absorbs. Ample free space, so the low-space gate does not answer
+      // first.
+      await withFreeSpace(AMPLE, () => mod.archiveSuspectTarball('bad-pkg', '1.0.0', 'http://127.0.0.1:1/bad-pkg-1.0.0.tgz', {
         score: 20,
         priority: 'T2'
-      });
+      }));
     } catch {
       // Expected: downloadToFile rejects, which is caught by the .catch wrapper in queue.js
       threw = true;
@@ -394,14 +416,14 @@ async function runTarballArchiveTests() {
     return dir;
   }
 
-  function withArchive(fn) {
+  function withArchive(fn, stat = AMPLE) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-safedelete-'));
     const origDir = process.env.MUADDIB_ARCHIVE_DIR;
     const origMax = process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS;
     process.env.MUADDIB_ARCHIVE_DIR = tmp;
     delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
     const mod = require('../../src/monitor/tarball-archive.js');
-    try { return fn(tmp, mod); }
+    try { return withFreeSpace(stat, () => fn(tmp, mod)); }
     finally {
       process.env.MUADDIB_ARCHIVE_DIR = origDir || '';
       if (!origDir) delete process.env.MUADDIB_ARCHIVE_DIR;
@@ -448,6 +470,25 @@ async function runTarballArchiveTests() {
       assert(!fs.existsSync(dir), 'un-pulled dir older than the hard ceiling must be dropped');
       assert(s.unpulledPurged === 1, `expected unpulledPurged=1, got ${s.unpulledPurged}`);
     });
+  });
+
+  test('cleanupOldArchives: below the free-space floor, un-pulled aged dirs are reclaimed oldest first', () => {
+    // Space stays below the floor during the whole cleanup: every retained un-pulled dir goes,
+    // oldest first; a dir inside the retention window is never touched.
+    const purgedOrder = [];
+    withArchive((tmp, mod) => {
+      const older = makeAgedDayDir(tmp, 20, { tgz: true, pulled: false });
+      const newer = makeAgedDayDir(tmp, 10, { tgz: true, pulled: false });
+      const recent = makeAgedDayDir(tmp, 1, { tgz: true, pulled: false });
+      const origWarn = console.warn;
+      console.warn = (m) => { const x = /DISK-PRESSURE purge of UN-PULLED (\S+)/.exec(String(m)); if (x) purgedOrder.push(x[1]); };
+      let s;
+      try { s = mod.cleanupOldArchives(7); } finally { console.warn = origWarn; }
+      assert(!fs.existsSync(older) && !fs.existsSync(newer), 'both aged un-pulled dirs reclaimed under disk pressure');
+      assert(fs.existsSync(recent), 'a dir inside the retention window is never reclaimed');
+      assert(s.unpulledPurged === 2 && s.retainedUnpulled === 0, `expected unpulledPurged=2/retained=0, got ${s.unpulledPurged}/${s.retainedUnpulled}`);
+      assert(purgedOrder.join(',') === [path.basename(older), path.basename(newer)].join(','), 'oldest first, got ' + purgedOrder.join(','));
+    }, NONE);
   });
 }
 
