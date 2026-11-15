@@ -48,13 +48,14 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { dataPath } = require('../shared/data-dir.js');
 
 const GHSA_API_HOST = 'api.github.com';
 const GHSA_ECOSYSTEMS = ['npm', 'pypi', 'crates'];
 const GHSA_CURSOR_FILE = process.env.MUADDIB_GHSA_CURSOR_FILE ||
-  path.join(__dirname, '..', '..', 'data', 'ghsa-cursor.json');
+  dataPath('ghsa-cursor.json');
 const GHSA_MALWARE_FILE = process.env.MUADDIB_GHSA_MALWARE_FILE ||
-  path.join(__dirname, '..', '..', 'data', 'ghsa-malware.jsonl');
+  dataPath('ghsa-malware.jsonl');
 const GHSA_MALWARE_MAX = 200_000; // denominator cap (GHSA malware is ~thousands; safety bound)
 const GHSA_POLL_INTERVAL_MS = (() => {
   const n = parseInt(process.env.MUADDIB_GHSA_POLL_INTERVAL_MS, 10);

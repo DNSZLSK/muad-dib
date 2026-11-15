@@ -38,6 +38,17 @@ if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
   if (!process.env.MUADDIB_TARBALL_CACHE_DIR) {
     process.env.MUADDIB_TARBALL_CACHE_DIR = path.join(os.tmpdir(), `muaddib-test-tarball-cache-${process.pid}`);
   }
+  // Every other monitor / feed / ML state file (detections, alerts, ledger, stats, queue
+  // state, cursors...) through one switch (src/shared/data-dir.js): the suite used to append
+  // test detections and alerts to the real data/ files of the checkout it ran in.
+  if (!process.env.MUADDIB_DATA_DIR) {
+    process.env.MUADDIB_DATA_DIR = path.join(os.tmpdir(), `muaddib-test-data-${process.pid}`);
+  }
+  // The tarball archive (suspects >= 20, evaluation random sample and near misses) defaults
+  // to /opt/muaddib/archive: a test that drives scanPackage must never write there.
+  if (!process.env.MUADDIB_ARCHIVE_DIR) {
+    process.env.MUADDIB_ARCHIVE_DIR = path.join(os.tmpdir(), `muaddib-test-archive-${process.pid}`);
+  }
 }
 
 const { getCounters } = require('./test-utils');
@@ -115,6 +126,7 @@ const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
 const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runIncompletenessTests } = require('./unit/incompleteness.test');
 const { runScannerBudgetTests } = require('./unit/scanner-budget.test');
+const { runDataDirTests } = require('./unit/data-dir.test');
 const { runIocDbTests } = require('./unit/ioc-db.test');
 const { runCheckOverridesTests } = require('./unit/check-overrides.test');
 const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
@@ -141,6 +153,7 @@ const { runFprBandGatesTests } = require('./unit/fpr-band-gates.test');
 const { runSdkDestinationTests } = require('./unit/sdk-destination.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
+const { runEvalCaptureTests } = require('./unit/eval-capture.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
 const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
@@ -400,6 +413,7 @@ async function timed(name, fn) {
   await timed('scoring-guards', runScoringGuardTests);
   await timed('incompleteness', runIncompletenessTests);
   await timed('scanner-budget', runScannerBudgetTests);
+  await timed('data-dir', runDataDirTests);
   await timed('ioc-db', runIocDbTests);
   await timed('check-overrides', runCheckOverridesTests);
   await timed('dilution-thresholds', runDilutionThresholdTests);
@@ -452,6 +466,7 @@ async function timed(name, fn) {
 
   // Tarball archive tests
   await timed('tarball-archive', runTarballArchiveTests);
+  await timed('eval-capture', runEvalCaptureTests);
   await timed('scan-ledger', runScanLedgerTests);
   await timed('shadow', runShadowTests);
   await timed('spill', runSpillTests);

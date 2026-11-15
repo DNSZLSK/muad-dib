@@ -32,8 +32,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { dataPath } = require('../shared/data-dir.js');
 
-const DEFAULT_TRAINING_FILE = path.join(__dirname, '..', '..', 'data', 'ml-training.jsonl');
+const DEFAULT_TRAINING_FILE = dataPath('ml-training.jsonl');
 let TRAINING_FILE = DEFAULT_TRAINING_FILE;
 const MAX_JSONL_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold
 

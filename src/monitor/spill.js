@@ -57,8 +57,9 @@ const fs = require('fs');
 const path = require('path');
 
 const { isProtected } = require('./scan-queue.js');
+const { dataPath } = require('../shared/data-dir.js');
 
-const DEFAULT_SPILL_FILE = path.join(__dirname, '..', '..', 'data', 'scan-backlog.jsonl');
+const DEFAULT_SPILL_FILE = dataPath('scan-backlog.jsonl');
 const DEFAULT_MAX_ENTRIES = 200_000;
 
 // Fields persisted per item — everything re-enqueue + protection need, nothing
