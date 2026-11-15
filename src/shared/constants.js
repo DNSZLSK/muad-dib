@@ -132,8 +132,17 @@ const crypto = require('crypto');
  * Cleared between scans via clearASTCache().
  * Key = sha256(code) + '|' + optionsKey (collision-free content-addressable key)
  */
-const _astCache = new Map();
-const _AST_CACHE_MAX = 200; // Max entries (reduced from 600 to limit memory during evaluate)
+//
+// Bounded by SOURCE SIZE, not by entry count. An acorn AST takes about 100-150 times the
+// memory of its source, and the cache used to keep up to 200 entries whatever their size:
+// a package with 15-20 MB of bundled JS kept every AST alive for the whole scan (mathjax
+// 4.1.3: 4.2 GB peak; plotly 6.7.0: out of memory at a 4 GB heap). Measured without the
+// cache: same findings and same scan time, 1.5 GB and 2.8 GB. A source larger than the
+// whole budget is never cached; otherwise the oldest entries are evicted until it fits.
+const _astCache = new Map();          // key -> { ast, bytes }
+const AST_CACHE_MAX_SOURCE_BYTES = 2 * 1024 * 1024; // sum of cached source lengths (UTF-16 units)
+let _astCacheMaxBytes = AST_CACHE_MAX_SOURCE_BYTES;
+let _astCacheBytes = 0;
 
 /**
  * Parse JS source with module-mode fallback to script-mode.
@@ -147,7 +156,7 @@ function safeParse(code, extraOptions = {}) {
   const cacheKey = crypto.createHash('sha256').update(code).digest('hex') + '|' + optKey;
 
   const cached = _astCache.get(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return cached.ast;
 
   const opts = { ...ACORN_OPTIONS, ...extraOptions };
   let ast;
@@ -162,14 +171,34 @@ function safeParse(code, extraOptions = {}) {
     }
   }
 
-  // Cache the result (including null for unparseable files)
-  if (_astCache.size >= _AST_CACHE_MAX) _astCache.clear();
-  _astCache.set(cacheKey, ast);
+  // Cache the result (including null for unparseable files) within the source-size budget
+  const bytes = code.length;
+  if (bytes <= _astCacheMaxBytes) {
+    for (const [k, v] of _astCache) {            // Map iterates in insertion order: oldest first
+      if (_astCacheBytes + bytes <= _astCacheMaxBytes) break;
+      _astCache.delete(k);
+      _astCacheBytes -= v.bytes;
+    }
+    _astCache.set(cacheKey, { ast, bytes });
+    _astCacheBytes += bytes;
+  }
   return ast;
 }
 
 function clearASTCache() {
   _astCache.clear();
+  _astCacheBytes = 0;
+}
+
+/** Cache occupancy, for tests and diagnostics. */
+function getASTCacheStats() {
+  return { entries: _astCache.size, sourceBytes: _astCacheBytes, maxSourceBytes: _astCacheMaxBytes };
+}
+
+/** Tests only: change the budget (null restores the default) and empty the cache. */
+function _setASTCacheMaxBytesForTest(n) {
+  _astCacheMaxBytes = n == null ? AST_CACHE_MAX_SOURCE_BYTES : n;
+  clearASTCache();
 }
 
 // PyPI install-time / import-time code execution: the PyPI equivalent of an npm install
@@ -192,4 +221,4 @@ const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
   'pth_exec_payload'
 ]);
 
-module.exports = { PYPI_IMPORT_TIME_RCE_TYPES, REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
+module.exports = { PYPI_IMPORT_TIME_RCE_TYPES, REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getASTCacheStats, _setASTCacheMaxBytesForTest, AST_CACHE_MAX_SOURCE_BYTES, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
