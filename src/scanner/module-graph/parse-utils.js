@@ -28,13 +28,37 @@ const { safeParse } = require('../../shared/constants.js');
 // Shared helpers
 // =============================================================================
 
+// Work budget of the module-graph analysis (architecture lot 2): every step reads its files
+// through parseFile, so the source characters handed to it measure the work, independently
+// of the machine. The budget is installed by runWithWorkBudget around ONE synchronous step:
+// nothing else can run while it is set, so the overlapping scans of `muaddib watch` (which
+// interleave only at awaits, between steps) never share it. Once spent, parseFile returns
+// null (the file is skipped, as an unreadable one) and the caller stops the analysis.
+let _workBudget = null;
+
+function runWithWorkBudget(budget, fn) {
+  const previous = _workBudget;
+  _workBudget = budget;
+  try {
+    return fn();
+  } finally {
+    _workBudget = previous;
+  }
+}
+
 function parseFile(filePath) {
+  const budget = _workBudget;
+  if (budget && budget.used >= budget.limit) {
+    budget.exhausted = true;
+    return null;
+  }
   let content;
   try {
     content = fs.readFileSync(filePath, 'utf8');
   } catch {
     return null;
   }
+  if (budget) budget.used += content.length;
   return safeParse(content, { allowReturnOutsideFunction: true, allowImportExportEverywhere: true });
 }
 
@@ -166,7 +190,7 @@ function toRel(abs, packagePath) {
 
 
 module.exports = {
-  parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
+  parseFile, runWithWorkBudget, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
   getExportName, getFunctionBody, getMemberChain, getReceiverRootName, extractLiteralArg,
   resolveLocal, isFileExists, toRel
 };

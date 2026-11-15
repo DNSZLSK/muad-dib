@@ -19,7 +19,10 @@
 
 'use strict';
 
-const walk = require('acorn-walk');
+// Stack-safe walker with acorn-walk's exact semantics (architecture lot 2): with acorn-walk,
+// a 5 000-link member chain anywhere in the file overflowed the stack, the pass threw, and
+// the caller silently analyzed the file without deobfuscation.
+const walk = require('../shared/safe-walk.js');
 const { safeParse } = require('../shared/constants.js');
 
 /**
@@ -507,21 +510,24 @@ function isStringFromCharCode(node) {
  * Supports +, -, *, ^, |, &, ~, <<, >> on numeric literals (recursive).
  * Returns a number or null if the expression contains non-constant parts.
  */
-function evaluateConstantExpr(node) {
+// Same bound as tryFoldConcat: a deeper constant expression is left unevaluated (null),
+// instead of recursing until the stack overflows.
+function evaluateConstantExpr(node, depth = 0) {
+  if (depth > MAX_FOLD_DEPTH) return null;
   if (node.type === 'Literal' && typeof node.value === 'number') {
     return node.value;
   }
   if (node.type === 'UnaryExpression' && node.operator === '-') {
-    const val = evaluateConstantExpr(node.argument);
+    const val = evaluateConstantExpr(node.argument, depth + 1);
     return val !== null ? -val : null;
   }
   if (node.type === 'UnaryExpression' && node.operator === '~') {
-    const val = evaluateConstantExpr(node.argument);
+    const val = evaluateConstantExpr(node.argument, depth + 1);
     return val !== null ? ~val : null;
   }
   if (node.type === 'BinaryExpression') {
-    const left = evaluateConstantExpr(node.left);
-    const right = evaluateConstantExpr(node.right);
+    const left = evaluateConstantExpr(node.left, depth + 1);
+    const right = evaluateConstantExpr(node.right, depth + 1);
     if (left === null || right === null) return null;
     switch (node.operator) {
       case '+': return left + right;
@@ -693,26 +699,26 @@ function tryResolveHexArrayMap(node, source) {
 /**
  * Check if an AST node (a function/arrow function) contains a reference to String.fromCharCode.
  */
-function containsFromCharCode(node) {
-  if (!node || typeof node !== 'object') return false;
-
-  // Direct check on this node
-  if (node.type === 'MemberExpression' &&
-      node.object?.type === 'Identifier' && node.object.name === 'String' &&
-      node.property?.type === 'Identifier' && node.property.name === 'fromCharCode') {
-    return true;
-  }
-
-  // Recurse into child nodes
-  for (const key of Object.keys(node)) {
-    if (key === 'type' || key === 'start' || key === 'end' || key === 'range') continue;
-    const child = node[key];
-    if (Array.isArray(child)) {
-      for (const c of child) {
-        if (c && typeof c === 'object' && containsFromCharCode(c)) return true;
+function containsFromCharCode(root) {
+  // Explicit stack (architecture lot 2): same nodes visited as the former recursion, which a
+  // deep chain inside the map callback could overflow.
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (node.type === 'MemberExpression' &&
+        node.object?.type === 'Identifier' && node.object.name === 'String' &&
+        node.property?.type === 'Identifier' && node.property.name === 'fromCharCode') {
+      return true;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === 'type' || key === 'start' || key === 'end' || key === 'range') continue;
+      const child = node[key];
+      if (Array.isArray(child)) {
+        for (const c of child) if (c && typeof c === 'object') stack.push(c);
+      } else if (child && typeof child === 'object' && child.type) {
+        stack.push(child);
       }
-    } else if (child && typeof child === 'object' && child.type) {
-      if (containsFromCharCode(child)) return true;
     }
   }
   return false;

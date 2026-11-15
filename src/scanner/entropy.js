@@ -20,6 +20,7 @@
 const path = require('path');
 const { findFiles, forEachSafeFile } = require('../utils.js');
 const { markIncomplete } = require('../shared/completeness.js');
+const { budgetOrder } = require('../shared/analyze-helper.js');
 
 const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__tests__', '__test__', 'dist', 'build'];
 
@@ -221,12 +222,17 @@ function scanEntropy(targetPath, options = {}) {
   const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
   let analyzedChars = 0;
   let overBudget = false;
-  forEachSafeFile(safeFiles, (file, content) => {
+  // Executed files first, closest to an entry point first (budgetOrder); findings are
+  // reassembled in the original file order, so the output only changes when the budget is hit.
+  const perFile = new Map();
+  forEachSafeFile(budgetOrder(targetPath, safeFiles).map(o => o.file), (file, content) => {
     if (byteBudget !== null && analyzedChars >= byteBudget) {
       overBudget = true;
       return;
     }
     analyzedChars += content.length;
+    const out = [];
+    perFile.set(file, out);
     // Skip files containing source maps (legitimate compiled output)
     if (hasSourceMap(content)) return;
 
@@ -234,7 +240,7 @@ function scanEntropy(targetPath, options = {}) {
 
     // Obfuscation pattern detection (MUADDIB-ENTROPY-003)
     const obfuscationThreats = detectObfuscationPatterns(content, relativePath);
-    threats.push(...obfuscationThreats);
+    out.push(...obfuscationThreats);
 
     // String-level entropy check (MUADDIB-ENTROPY-001)
     const strings = extractStringLiterals(content);
@@ -251,7 +257,7 @@ function scanEntropy(targetPath, options = {}) {
           const w = str.slice(i, i + WINDOW);
           if (w.length < 20) continue;
           if (calculateShannonEntropy(w) > WIN_THRESHOLD) {
-            threats.push({
+            out.push({
               type: 'high_entropy_string',
               severity: ENCODING_TABLE_RE.test(relativePath) ? 'LOW' : 'MEDIUM',
               message: `High entropy window in long string (${str.length} chars, offset ${i}) — possible padded payload`,
@@ -271,7 +277,7 @@ function scanEntropy(targetPath, options = {}) {
       if (strEntropy > stringThreshold) {
         const isEncodingTable = ENCODING_TABLE_RE.test(relativePath);
         const severity = isEncodingTable ? 'LOW' : (strEntropy > STRING_ENTROPY_HIGH ? 'HIGH' : 'MEDIUM');
-        threats.push({
+        out.push({
           type: 'high_entropy_string',
           severity,
           message: `High entropy string (${strEntropy.toFixed(2)} bits, ${str.length} chars) — possible base64/hex/encrypted payload`,
@@ -290,7 +296,7 @@ function scanEntropy(targetPath, options = {}) {
       calculateShannonEntropy(s) > FRAG_ENTROPY
     );
     if (frags.length >= FRAG_COUNT) {
-      threats.push({
+      out.push({
         type: 'fragmented_high_entropy_cluster',
         severity: ENCODING_TABLE_RE.test(relativePath) ? 'LOW' : 'MEDIUM',
         message: `Fragment cluster: ${frags.length} short high-entropy strings (8-49 chars) — possible payload fragmentation.`,
@@ -298,6 +304,7 @@ function scanEntropy(targetPath, options = {}) {
       });
     }
   }, { shouldStop: () => overBudget });
+  for (const f of safeFiles) if (perFile.has(f)) threats.push(...perFile.get(f));
 
   if (overBudget) markIncomplete('scanEntropy', 'work-budget', { limit: byteBudget, observed: analyzedChars });
   return threats;

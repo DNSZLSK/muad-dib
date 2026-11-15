@@ -374,9 +374,9 @@ async function runAuditFix8Tests() {
 async function runAuditFix9Tests() {
   console.log('\n=== AUDIT FIX 9: Scan timeouts ===\n');
 
-  // C1: removed the executor.js source-grep (MODULE_GRAPH_TIMEOUT_MS presence). The behavioral
+  // C1: removed the executor.js source-grep (module-graph budget presence). The behavioral
   // property — scans complete and never hang — is covered by "FIX9: Normal scan completes within
-  // timeout" below and by tests/scanner/module-graph.test.js (which runs the graph with its timeout
+  // timeout" below and by tests/scanner/module-graph.test.js (which runs the graph with its work budget
   // active).
 
   await asyncTest('FIX9: Normal scan completes within timeout', async () => {

@@ -415,6 +415,34 @@ async function runDeobfuscateTests() {
     assertIncludes(code, "require('child_process')", 'the concat payload after the literals must still be folded');
     assertIncludes(code, "'u7',", 'backtick literals must be rewritten as quoted strings');
   });
+
+  // Architecture lot 2: with acorn-walk's recursive walker, a 5 000-link chain anywhere in
+  // the file overflowed the stack, deobfuscate() threw, and the caller analyzed the file
+  // without deobfuscation (silently: the failure is skipped).
+  test('DEOBFUSCATE: a 5 000-link member or call chain does not disable the pass', () => {
+    for (const link of ['.a', '.a()']) {
+      const src = "const m = require('ch' + 'il' + 'd_' + 'process');\nvar r = o" + link.repeat(5000) + ';\n';
+      const { code } = deobfuscate(src);
+      assertIncludes(code, "'child_process'", `chain ${link}: concat must still be folded`);
+    }
+  });
+
+  test('DEOBFUSCATE: a fromCharCode map callback holding a deep chain does not throw', () => {
+    const src = "const s = [0x63,0x68].map(c => String.fromCharCode(c) + o" + '.a'.repeat(5000) + ").join('');";
+    let threw = null;
+    try { deobfuscate(src); } catch (e) { threw = e; }
+    assert(!threw, 'must not throw: ' + (threw && threw.message));
+  });
+
+  test('DEOBFUSCATE: constant arithmetic deeper than the fold bound is left as is, not a crash', () => {
+    const deep = Array.from({ length: 3000 }, () => '1').join(' + ');
+    let r = null; let threw = null;
+    try { r = deobfuscate(`const s = String.fromCharCode(${deep});`); } catch (e) { threw = e; }
+    assert(!threw, 'must not throw: ' + (threw && threw.message));
+    assert(r && !r.code.includes(String.fromCharCode(3000)), 'an expression past the bound is not evaluated');
+    const shallow = deobfuscate('const s = String.fromCharCode(0x60 + 1, 0x62);');
+    assertIncludes(shallow.code, "'ab'", 'a shallow constant expression is still evaluated');
+  });
 }
 
 module.exports = { runDeobfuscateTests };

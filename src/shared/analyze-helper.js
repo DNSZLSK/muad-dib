@@ -56,6 +56,26 @@ function executedFiles(targetPath) {
 }
 
 /**
+ * Processing order under a work budget (architecture lot 2): the files the package executes
+ * first, closest to an entry point first (executedFiles is filled by a breadth-first walk
+ * from the entry points, so its order is the BFS depth order), then the other files in their
+ * original order. A budget cut therefore drops the files farthest from what runs, and
+ * padding the package with decoy files cannot push the entry points past it.
+ * @returns {Array<{file: string, index: number}>} index = position in `files`
+ */
+function budgetOrder(targetPath, files) {
+  const rank = new Map();
+  for (const rel of executedFiles(targetPath)) rank.set(rel, rank.size);
+  const NOT_EXECUTED = Number.MAX_SAFE_INTEGER;
+  const order = files.map((file, index) => {
+    const rel = path.relative(targetPath, file).replace(/\\/g, '/');
+    return { file, index, rel, rank: rank.has(rel) ? rank.get(rel) : NOT_EXECUTED };
+  });
+  order.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  return order;
+}
+
+/**
  * Shared scanner wrapper: iterates JS files, runs analyzeFileFn on original + deobfuscated code,
  * deduplicates findings by type::message key.
  * @param {string} targetPath - Root directory to scan
@@ -80,8 +100,7 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   // reassembled in the original file order, so the output does not depend on the
   // processing order. The hard wall-clock bound is one level up (hard-timeout.js, monitor
   // worker).
-  const order = files.map((file, index) => ({ file, index, rel: path.relative(targetPath, file).replace(/\\/g, '/') }));
-  order.sort((a, b) => (executed.has(a.rel) ? 0 : 1) - (executed.has(b.rel) ? 0 : 1) || a.index - b.index);
+  const order = budgetOrder(targetPath, files);
   const indexOf = new Map(order.map(o => [o.file, o.index]));
   const perFile = new Array(files.length);
   let analyzedChars = 0;
@@ -174,4 +193,4 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   return threats;
 }
 
-module.exports = { analyzeWithDeobfuscation, executedFiles };
+module.exports = { analyzeWithDeobfuscation, executedFiles, budgetOrder };
