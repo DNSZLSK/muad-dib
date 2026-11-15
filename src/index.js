@@ -25,10 +25,20 @@ const { execute } = require('./pipeline/executor.js');
 const { process: processThreats } = require('./pipeline/processor.js');
 const { output } = require('./pipeline/outputter.js');
 
-// Each scan gets its own incompleteness record (AsyncLocalStorage), so concurrent
-// scans in one process (`muaddib watch` re-scans without awaiting) stay isolated.
+// Scans of one process run one after the other (architecture lot 2). Several modules keep
+// per-scan state at module level (exclusions, config overrides, file-size cap, file-list and
+// AST caches; see scan-context.js), and the end of a scan resets it: a scan that ended while
+// another was running (`muaddib watch` re-scans on a change without waiting, the daemon
+// scans several directories) reset the other one's exclusions and config mid-analysis. The
+// scanners are synchronous, so running scans side by side only interleaved them and saved
+// no time. A failed scan does not block the next one. Each scan also keeps its own
+// incompleteness record (AsyncLocalStorage).
+let _scanQueue = Promise.resolve();
+
 function run(targetPath, options = {}) {
-  return withScanRecord(() => runScan(targetPath, options));
+  const result = _scanQueue.then(() => withScanRecord(() => runScan(targetPath, options)));
+  _scanQueue = result.then(() => {}, () => {});
+  return result;
 }
 
 async function runScan(targetPath, options = {}) {

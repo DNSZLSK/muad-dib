@@ -36,7 +36,7 @@ const { scanGitHubActions } = require('../scanner/github-actions.js');
 const { scanEntropy } = require('../scanner/entropy.js');
 const { scanAIConfig } = require('../scanner/ai-config.js');
 const { deobfuscate } = require('../scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_FLOWS } = require('../scanner/module-graph');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, runWithWorkBudget, MAX_FLOWS } = require('../scanner/module-graph');
 const { markIncomplete, resetCompleteness } = require('../shared/completeness.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 // Below this many npm IOC entries the database is considered absent: the YAML built-ins alone
@@ -47,6 +47,12 @@ const MIN_LOADED_IOC_PACKAGES = 1000;
 // 16.8 MB of analyzable source (vuetify, pro-design-vue, 2 000-file cap reached), 0.7 to
 // 3.9 s per MB for AST + dataflow. 32 Mi is about twice the largest benign package.
 const DEFAULT_SCANNER_WORK_BUDGET = 32 * 1024 * 1024;
+// Module-graph analysis, in source characters read by its six steps together (each step
+// reads the graph's files again, the direct-flow steps twice). Measured 2026-11-15 on the
+// same 50 packages: at most 22.6 Mi (@emotion-icons/crypto, 944 files, about 4 s; it flipped
+// between COMPLETE and INCONCLUSIVE under the former 5 s clock), next 18.8 Mi; 5 to 10 Mi
+// per second. 32 Mi is about 1.4 times the largest benign package.
+const DEFAULT_MODULE_GRAPH_WORK_BUDGET = 32 * 1024 * 1024;
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
@@ -233,16 +239,16 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     setImmediate(() => { try { resolve(fn()); } catch (e) { reject(e); } })
   );
 
-  // Cross-file module graph analysis (before individual scanners)
-  // Bounded: 5s timeout to prevent DoS on large/adversarial packages
-  // Env-tunable (non-negative integer ms) so the timeout path is testable
-  // deterministically; any invalid value falls back to the 5 s default.
-  // Strict parse: only a plain non-negative integer string is accepted. An empty or
-  // malformed value (`MUADDIB_MODULE_GRAPH_TIMEOUT_MS=` in a CI config) must not
-  // become Number('') === 0, which would skip cross-file analysis on every scan.
-  const rawGraphBudget = process.env.MUADDIB_MODULE_GRAPH_TIMEOUT_MS;
-  const MODULE_GRAPH_TIMEOUT_MS = typeof rawGraphBudget === 'string' && /^\d+$/.test(rawGraphBudget.trim())
-    ? parseInt(rawGraphBudget.trim(), 10) : 5000;
+  // Cross-file module graph analysis (before individual scanners).
+  // Bounded by a work budget in source characters read (architecture lot 2), not a clock:
+  // the 5 s wall-clock budget it replaces flipped borderline packages between COMPLETE and
+  // INCONCLUSIVE from one run to the next. Env-tunable (non-negative integer) so the
+  // exhaustion path is testable. Strict parse: an empty or malformed value
+  // (`MUADDIB_MODULE_GRAPH_WORK_BUDGET=` in a CI config) must not become Number('') === 0,
+  // which would skip cross-file analysis on every scan.
+  const rawGraphBudget = process.env.MUADDIB_MODULE_GRAPH_WORK_BUDGET;
+  const MODULE_GRAPH_WORK_BUDGET = typeof rawGraphBudget === 'string' && /^\d+$/.test(rawGraphBudget.trim())
+    ? parseInt(rawGraphBudget.trim(), 10) : DEFAULT_MODULE_GRAPH_WORK_BUDGET;
   let crossFileFlows = [];
   // Threats ABOUT the module graph (audit DF-C1): truncation when the package
   // exceeds MAX_GRAPH_NODES. Separate from crossFileFlows because the latter
@@ -253,22 +259,19 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // exactly once, by this function, after its last step. The previous
     // Promise.race let the losing work keep running and mutate crossFileFlows
     // after the scan had moved on, so the verdict depended on which step was
-    // reached (28 -> 10 or 10 -> 28, audit 2026-09-29). Every step is synchronous,
-    // so a timer could never interrupt one anyway: the budget is now checked at
-    // step boundaries. Past the deadline the remaining steps are skipped, the
-    // flows already produced still go through the destination filter, and the
-    // analysis is marked INCONCLUSIVE.
-    const graphDeadline = Date.now() + MODULE_GRAPH_TIMEOUT_MS;
-    let graphTimedOut = false;
-    const overBudget = () => {
-      if (!graphTimedOut && Date.now() >= graphDeadline) graphTimedOut = true;
-      return graphTimedOut;
-    };
+    // reached (28 -> 10 or 10 -> 28, audit 2026-09-29). Every step is synchronous and
+    // reads its files through parseFile, which charges the budget: once it is spent,
+    // the step skips its remaining files and the next steps are skipped; the flows
+    // already produced still go through the destination filter, and the analysis is
+    // marked INCONCLUSIVE. Same input, same budget, same result on any machine.
+    const graphBudget = { limit: MODULE_GRAPH_WORK_BUDGET, used: 0, exhausted: false };
+    const step = (fn) => yieldThen(() => runWithWorkBudget(graphBudget, fn));
+    const overBudget = () => graphBudget.exhausted;
     const moduleGraphWork = async () => {
       let direct = [];
       let indirect = [];
       const graphMeta = {};
-      const graph = await yieldThen(() => buildModuleGraph(targetPath, graphMeta));
+      const graph = await step(() => buildModuleGraph(targetPath, graphMeta));
       if (graphMeta.truncated) {
         warnings.push(`Module graph skipped: ${graphMeta.fileCount} files exceeds MAX_GRAPH_NODES (${graphMeta.maxNodes})`);
         moduleGraphThreats.push({
@@ -287,17 +290,17 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       try {
         run: {
           if (overBudget()) break run;
-          const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
+          const tainted = await step(() => annotateTaintedExports(graph, targetPath));
           if (overBudget()) break run;
-          const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
+          const sinkAnnotations = await step(() => annotateSinkExports(graph, targetPath));
           if (overBudget()) break run;
-          direct = await yieldThen(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
+          direct = await step(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
           if (overBudget()) break run;
           // Callback-based cross-file flow detection
-          indirect = indirect.concat(await yieldThen(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath)));
+          indirect = indirect.concat(await step(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath)));
           if (overBudget()) break run;
           // EventEmitter cross-module flow detection
-          indirect = indirect.concat(await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath)));
+          indirect = indirect.concat(await step(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath)));
         }
       } catch (e) {
         debugLog('[MODULE-GRAPH] Error:', e && e.message);
@@ -328,9 +331,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       markIncomplete('moduleGraph', 'error');
       crossFileFlows = [];
     }
-    if (graphTimedOut) {
-      markIncomplete('moduleGraph', 'timeout', { limit: MODULE_GRAPH_TIMEOUT_MS });
-      warnings.push(`Module graph analysis timed out (${MODULE_GRAPH_TIMEOUT_MS / 1000}s) — cross-file flows may be incomplete`);
+    debugLog(`[MODULE-GRAPH] work ${graphBudget.used} / ${MODULE_GRAPH_WORK_BUDGET} chars`);
+    if (graphBudget.exhausted) {
+      markIncomplete('moduleGraph', 'work-budget', { limit: MODULE_GRAPH_WORK_BUDGET, observed: graphBudget.used });
+      warnings.push(`Module graph analysis stopped at its work budget (${MODULE_GRAPH_WORK_BUDGET} source characters): cross-file flows may be incomplete`);
     }
   }
 

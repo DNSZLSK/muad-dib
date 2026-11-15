@@ -64,6 +64,39 @@ async function runAntiForensicTests() {
     assert(r.count === 1, 'Only 1 pattern → rule does not escalate');
   });
 
+  // ── Iterative walk (architecture lot 2) ──
+
+  test('AF: 5 000-link member and call chains in the payload file do not hide the pattern', () => {
+    const payload =
+      'const fs = require("fs"); const K = "OrDeR_7077";\n' +
+      'for (let i = 0; i < P.length; i++) out[i] = P[i] ^ K.charCodeAt(i % K.length);\n' +
+      'fs.writeFileSync("package.md", "# moved"); fs.unlinkSync(__filename);\n';
+    for (const link of ['.a', '.a()']) {
+      const r = analyzeFile(payload + 'var r = o' + link.repeat(5000) + ';\n');
+      assert(r && r.count === 3, `chain ${link}: 3 of 3 expected, got ` + JSON.stringify(r));
+    }
+  });
+
+  test('AF: self-delete in a while condition or a for-of iterable is seen', () => {
+    for (const code of [
+      'const fs = require("fs"); while (fs.unlinkSync(__filename)) {}',
+      'const fs = require("fs"); do {} while (fs.unlinkSync(__filename));',
+      'const fs = require("fs"); for (const x of [fs.unlinkSync(__filename)]) {}'
+    ]) {
+      const r = analyzeFile(code);
+      assert(r && r.evidence.selfDelete, 'self-delete must be seen in: ' + code);
+    }
+  });
+
+  test('AF: XOR in a for test or a while condition does not count as a loop XOR (unchanged)', () => {
+    for (const code of ['for (let i = 0; (d ^ 0x42) < n; i++) {}', 'while ((d ^ 0x42) < n) {}', 'for (const c of [d ^ 0x42]) {}']) {
+      const r = analyzeFile(code);
+      assert(!r || !r.evidence.xorLoop, 'XOR outside the loop body must not fire: ' + code);
+    }
+    const inBody = analyzeFile('while (i < n) { function f() { return d ^ 0x42; } }');
+    assert(inBody && inBody.evidence.xorLoop, 'XOR in a function nested in a loop body still fires');
+  });
+
   // ── Scanner-level tests (scanAntiForensic) ──
 
   await asyncTest('AF: full pattern (3 of 3) → CRITICAL anti_forensic_xor_autodelete', async () => {

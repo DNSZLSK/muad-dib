@@ -37,8 +37,8 @@ const { markIncomplete } = require('../../shared/completeness.js');
 function buildModuleGraph(packagePath, meta = {}) {
   const graph = {};
   // maxFiles: 0 (unlimited) — we need the true count to detect monorepo / large package
-  // truncation. MAX_GRAPH_NODES below caps the AST work; MODULE_GRAPH_TIMEOUT_MS in
-  // executor.js bounds the wall-time (audit DF-C1).
+  // truncation. MAX_GRAPH_NODES below caps the AST work; the work budget (parse-utils.js runWithWorkBudget, set in
+  // executor.js) bounds the source characters read (audit DF-C1).
   const files = findFiles(packagePath, {
     extensions: ['.js', '.mjs', '.cjs'],
     excludedDirs: EXCLUDED_DIRS,
