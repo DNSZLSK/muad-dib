@@ -1764,6 +1764,19 @@ const RULES = {
     references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
     mitre: 'T1195.002'
   },
+  workflow_context_to_action_input: {
+    id: 'MUADDIB-GHA-007',
+    name: 'GitHub Actions Context Passed to an Action Input',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    domain: 'vulnerability',
+    description: 'Contexte d\'evenement controle par un attaquant (corps ou titre de commentaire, issue, PR, discussion, head_ref) passe en input with: a une action autre que actions/* et github/*. Injection si l\'action developpe l\'input dans son propre shell (action composite avec ${{ inputs.x }} dans run:, cf. CVE-2023-49291), ce qui ne se voit pas depuis le workflow.',
+    references: [
+      'https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections',
+      'https://nvd.nist.gov/vuln/detail/CVE-2023-49291'
+    ],
+    mitre: 'T1195.002'
+  },
   workflow_pwn_request: {
     id: 'MUADDIB-GHA-003',
     name: 'GitHub Actions Pwn Request',

@@ -532,6 +532,91 @@ jobs:
     assert(s === undefined || s === 'LOW', 'unpinned_action must not be raised, got ' + s);
     assert(r.score <= 3, 'score ' + r.score);
   });
+
+  // --- GHA-007: attacker-controlled context handed to an action input ----------------
+
+  const inputFindings = (yamlText, maker = makeTempWorkflow) => {
+    const tmp = maker(yamlText);
+    try { return scanGitHubActions(tmp); } finally { cleanupTemp(tmp); }
+  };
+  const WF_INPUT = 'on: issue_comment\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+    '      - uses: some-org/comment-action@v1\n        with:\n          body: ${{ github.event.comment.body }}\n';
+
+  test('GHA-007: context passed to a third-party action input is MEDIUM, not an injection, no compound', () => {
+    const t = inputFindings(WF_INPUT);
+    const f = t.filter(x => x.type === 'workflow_context_to_action_input');
+    assert(f.length === 1 && f[0].severity === 'MEDIUM', 'one MEDIUM finding expected: ' + JSON.stringify(t.map(x => x.type)));
+    assert(/comment-action/.test(f[0].message) && /"body"/.test(f[0].message), 'message names the action and the input: ' + f[0].message);
+    assert(!t.some(x => x.type === 'workflow_injection'), 'must not be reported as an injection');
+    assert(!t.some(x => x.type === 'unpinned_action_in_risky_workflow'), 'must not feed the GHA-006 compound (unpinned @v1 here)');
+  });
+
+  test('GHA-007: a local action that cannot be read stays MEDIUM', () => {
+    const t = inputFindings('on: issues\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+      '      - uses: ./.github/actions/triage\n        with:\n          title: ${{ github.event.issue.title }}\n');
+    assert(t.some(x => x.type === 'workflow_context_to_action_input'), 'missing local action: MEDIUM expected');
+  });
+
+  // A local action's action.yml is in the scanned tree: what it does with the input is read.
+  const WF_LOCAL = 'on: issues\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+    '      - uses: ./.github/actions/triage\n        with:\n          title: ${{ github.event.issue.title }}\n';
+  function localActionFindings(actionYaml, workflow = WF_LOCAL) {
+    const tmp = makeTempWorkflow(workflow);
+    const dir = path.join(tmp, '.github', 'actions', 'triage');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'action.yml'), actionYaml);
+    try { return scanGitHubActions(tmp); } finally { cleanupTemp(tmp); }
+  }
+
+  test('GHA-007: a local composite action expanding the input in run: is a workflow_injection (HIGH)', () => {
+    const t = localActionFindings('runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: echo "${{ inputs.title }}"\n');
+    const inj = t.filter(x => x.type === 'workflow_injection');
+    assert(inj.length === 1 && inj[0].severity === 'HIGH' && /local action/.test(inj[0].message), 'HIGH injection expected: ' + JSON.stringify(t.map(x => x.type)));
+    assert(!t.some(x => x.type === 'workflow_context_to_action_input'), 'decided case must not also be MEDIUM');
+  });
+
+  test('GHA-007: a local node action, or a composite that does not expand the input, is data (negative)', () => {
+    const node = localActionFindings("runs:\n  using: node20\n  main: index.js\n");
+    const quiet = localActionFindings('runs:\n  using: composite\n  steps:\n    - shell: bash\n      env:\n        T: ${{ inputs.title }}\n      run: echo "$T"\n');
+    for (const [name, t] of [['node', node], ['env-only composite', quiet]]) {
+      assert(!t.some(x => x.type === 'workflow_context_to_action_input' || x.type === 'workflow_injection'),
+        `${name}: nothing expected, got ` + JSON.stringify(t.map(x => x.type)));
+    }
+  });
+
+  test('GHA-007: a local composite that forwards the input to a nested action stays MEDIUM', () => {
+    const t = localActionFindings('runs:\n  using: composite\n  steps:\n    - uses: some-org/x@v1\n      with:\n        text: ${{ inputs.title }}\n');
+    assert(t.some(x => x.type === 'workflow_context_to_action_input') && !t.some(x => x.type === 'workflow_injection'),
+      'forwarded input: MEDIUM only, got ' + JSON.stringify(t.map(x => x.type)));
+  });
+
+  test('GHA-007: a local path that leaves the scanned tree is not read and stays MEDIUM', () => {
+    // A readable node action (data) sits next to the scanned tree: reading it would clear the finding.
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gha-out-'));
+    const repo = path.join(base, 'repo');
+    fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), WF_LOCAL.replace('./.github/actions/triage', './../outside'));
+    fs.mkdirSync(path.join(base, 'outside'));
+    fs.writeFileSync(path.join(base, 'outside', 'action.yml'), 'runs:\n  using: node20\n  main: index.js\n');
+    try {
+      const t = scanGitHubActions(repo);
+      assert(t.some(x => x.type === 'workflow_context_to_action_input'), 'out-of-tree action must not be read: ' + JSON.stringify(t.map(x => x.type)));
+    } finally { cleanupTemp(base); }
+  });
+
+  test('GHA-007: first-party actions and non-attacker contexts are not reported (negative)', () => {
+    const t = inputFindings('on: issues\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+      '      - uses: actions/upload-artifact@v4\n        with:\n          name: ${{ github.event.issue.title }}\n' +
+      '      - uses: some-org/x@v1\n        with:\n          number: ${{ github.event.issue.number }}\n');
+    assert(!t.some(x => x.type === 'workflow_context_to_action_input'), 'unexpected: ' + JSON.stringify(t.map(x => x.type)));
+  });
+
+  await asyncTest('GHA-007: keeps MEDIUM in a repository checkout, LOW in a downloaded package', async () => {
+    const repo = await scanWorkflow(WF_INPUT, 'bot.yml', { repository: true });
+    assert(repo.sev('workflow_context_to_action_input') === 'MEDIUM', 'repository: ' + repo.sev('workflow_context_to_action_input'));
+    const pkg = await scanWorkflow(WF_INPUT, 'bot.yml');
+    assert(pkg.sev('workflow_context_to_action_input') === 'LOW', 'package: ' + pkg.sev('workflow_context_to_action_input'));
+  });
 }
 
 module.exports = { runGitHubActionsTests };

@@ -577,7 +577,7 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
 // unpinned_action (a mutable tag) is a hygiene finding, emitted LOW by the scanner: left out.
 const REPOSITORY_WORKFLOW_TYPES = new Set([
   'workflow_pwn_request', 'workflow_injection', 'workflow_secrets_dump',
-  'unpinned_action_in_risky_workflow'
+  'unpinned_action_in_risky_workflow', 'workflow_context_to_action_input'
 ]);
 
 // ============================================

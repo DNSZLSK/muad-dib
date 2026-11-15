@@ -266,6 +266,11 @@ const PLAYBOOKS = {
   workflow_injection:
     'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner. Supprimer ou corriger le workflow.',
 
+  workflow_context_to_action_input:
+    'Contexte controle par un attaquant passe en input a une action tierce ou locale. Verifier si l\'action ' +
+    'developpe cet input dans un shell (run: avec ${{ inputs.x }}) ; sinon passer la valeur par env: et ' +
+    'epingler l\'action au SHA.',
+
   workflow_pwn_request:
     'CRITIQUE: Pwn request detecte — pull_request_target avec checkout du head de la PR permet l\'execution de code arbitraire. Remplacer par pull_request ou utiliser une strategie de checkout securisee (base ref uniquement).',
 
