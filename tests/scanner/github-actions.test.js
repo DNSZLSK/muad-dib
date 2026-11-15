@@ -532,6 +532,44 @@ jobs:
     assert(s === undefined || s === 'LOW', 'unpinned_action must not be raised, got ' + s);
     assert(r.score <= 3, 'score ' + r.score);
   });
+
+  // --- GHA-007: attacker-controlled context handed to an action input ----------------
+
+  const inputFindings = (yamlText, maker = makeTempWorkflow) => {
+    const tmp = maker(yamlText);
+    try { return scanGitHubActions(tmp); } finally { cleanupTemp(tmp); }
+  };
+  const WF_INPUT = 'on: issue_comment\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+    '      - uses: some-org/comment-action@v1\n        with:\n          body: ${{ github.event.comment.body }}\n';
+
+  test('GHA-007: context passed to a third-party action input is MEDIUM, not an injection, no compound', () => {
+    const t = inputFindings(WF_INPUT);
+    const f = t.filter(x => x.type === 'workflow_context_to_action_input');
+    assert(f.length === 1 && f[0].severity === 'MEDIUM', 'one MEDIUM finding expected: ' + JSON.stringify(t.map(x => x.type)));
+    assert(/comment-action/.test(f[0].message) && /"body"/.test(f[0].message), 'message names the action and the input: ' + f[0].message);
+    assert(!t.some(x => x.type === 'workflow_injection'), 'must not be reported as an injection');
+    assert(!t.some(x => x.type === 'unpinned_action_in_risky_workflow'), 'must not feed the GHA-006 compound (unpinned @v1 here)');
+  });
+
+  test('GHA-007: a local action input is reported too', () => {
+    const t = inputFindings('on: issues\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+      '      - uses: ./.github/actions/triage\n        with:\n          title: ${{ github.event.issue.title }}\n');
+    assert(t.some(x => x.type === 'workflow_context_to_action_input'), 'local action input expected');
+  });
+
+  test('GHA-007: first-party actions and non-attacker contexts are not reported (negative)', () => {
+    const t = inputFindings('on: issues\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n' +
+      '      - uses: actions/upload-artifact@v4\n        with:\n          name: ${{ github.event.issue.title }}\n' +
+      '      - uses: some-org/x@v1\n        with:\n          number: ${{ github.event.issue.number }}\n');
+    assert(!t.some(x => x.type === 'workflow_context_to_action_input'), 'unexpected: ' + JSON.stringify(t.map(x => x.type)));
+  });
+
+  await asyncTest('GHA-007: keeps MEDIUM in a repository checkout, LOW in a downloaded package', async () => {
+    const repo = await scanWorkflow(WF_INPUT, 'bot.yml', { repository: true });
+    assert(repo.sev('workflow_context_to_action_input') === 'MEDIUM', 'repository: ' + repo.sev('workflow_context_to_action_input'));
+    const pkg = await scanWorkflow(WF_INPUT, 'bot.yml');
+    assert(pkg.sev('workflow_context_to_action_input') === 'LOW', 'package: ' + pkg.sev('workflow_context_to_action_input'));
+  });
 }
 
 module.exports = { runGitHubActionsTests };

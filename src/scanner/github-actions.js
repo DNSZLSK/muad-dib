@@ -29,9 +29,9 @@ const MAX_DEPTH = 10;
 // The code a workflow or composite action executes with expressions expanded in place: each
 // step's `run:` script and the `script:` input of actions/github-script. An expression there
 // is substituted into the code before it runs (script injection). Passed through `env:` (the
-// mitigation GitHub documents) or as an input of another action, it is data. Returns null when
+// mitigation GitHub documents), it is data. Returns { scripts, actionInputs }, or null when
 // the file is not a parsable workflow / action: the caller then keeps the whole-file match.
-function executedScripts(content) {
+function parseWorkflowSteps(content) {
   let doc;
   try {
     doc = yaml.load(content, { schema: yaml.JSON_SCHEMA });
@@ -46,17 +46,27 @@ function executedScripts(content) {
   if (doc.runs && Array.isArray(doc.runs.steps)) stepLists.push(doc.runs.steps);
   if (stepLists.length === 0) return null;
   const scripts = [];
+  // Inputs of actions other than the first-party actions/* and github/* (local, third-party,
+  // docker): whether such an action interpolates an input into its own shell (a composite
+  // action writing ${{ inputs.x }} in run:, cf. CVE-2023-49291) cannot be seen from here.
+  const actionInputs = [];
   for (const steps of stepLists) {
     for (const step of steps) {
       if (!step || typeof step !== 'object') continue;
       if (typeof step.run === 'string') scripts.push(step.run);
-      if (typeof step.uses === 'string' && /^actions\/github-script@/i.test(step.uses) &&
-          step.with && typeof step.with.script === 'string') {
-        scripts.push(step.with.script);
+      if (typeof step.uses !== 'string' || !step.with || typeof step.with !== 'object') continue;
+      if (/^actions\/github-script@/i.test(step.uses)) {
+        if (typeof step.with.script === 'string') scripts.push(step.with.script);
+        continue;
+      }
+      const org = step.uses.split('/')[0].toLowerCase();
+      if (org === 'actions' || org === 'github') continue;
+      for (const [input, value] of Object.entries(step.with)) {
+        if (typeof value === 'string') actionInputs.push({ uses: step.uses, input, value });
       }
     }
   }
-  return scripts;
+  return { scripts, actionInputs };
 }
 
 function scanGitHubActions(targetPath) {
@@ -140,8 +150,8 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
       // Matched only in executed code (run / github-script) when the file parses; a value
       // passed through env: is the documented mitigation, not an injection. Unparsable file:
       // whole-file match, as before.
-      const scripts = executedScripts(content);
-      const injectionScope = scripts === null ? [activeContent] : scripts;
+      const parsed = parseWorkflowSteps(content);
+      const injectionScope = parsed === null ? [activeContent] : parsed.scripts;
       for (const { regex, msg } of injectionPatterns) {
         if (injectionScope.some(s => regex.test(s))) {
           fileHasInjection = true;
@@ -149,6 +159,24 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
             type: 'workflow_injection',
             severity: 'HIGH',
             message: 'Potential injection: ' + msg,
+            file: relFile
+          });
+        }
+      }
+
+      // GHA-007: the same attacker-controlled context handed as an input to an action other
+      // than actions/* and github/*. Injectable only if that action expands the input into its
+      // own shell, which cannot be seen from the workflow: MEDIUM, a separate type, and NOT an
+      // injection for the GHA-006 compound (which would make it CRITICAL on a maybe).
+      if (parsed !== null) {
+        const seen = new Set();
+        for (const { uses, input, value } of parsed.actionInputs) {
+          if (seen.has(uses + '|' + input) || !injectionPatterns.some(p => p.regex.test(value))) continue;
+          seen.add(uses + '|' + input);
+          threats.push({
+            type: 'workflow_context_to_action_input',
+            severity: 'MEDIUM',
+            message: `Attacker-controlled GitHub event context passed as input "${input}" to ${uses}: an injection if the action expands the input into its own shell (cf. CVE-2023-49291)`,
             file: relFile
           });
         }
