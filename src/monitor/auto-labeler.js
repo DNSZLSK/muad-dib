@@ -37,9 +37,10 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { dataPath } = require('../shared/data-dir.js');
 
-const DEFAULT_INPUT = path.join(__dirname, '..', '..', 'data', 'ml-training.jsonl');
-const DEFAULT_OUTPUT = path.join(__dirname, '..', '..', 'data', 'ml-training-relabeled.jsonl');
+const DEFAULT_INPUT = dataPath('ml-training.jsonl');
+const DEFAULT_OUTPUT = dataPath('ml-training-relabeled.jsonl');
 const DEFAULT_DELAY_MS = 50; // 20 req/s — CLI one-shot, no monitor slot sharing needed
 const SURVIVAL_DAYS = 30;
 

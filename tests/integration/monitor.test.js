@@ -9442,6 +9442,36 @@ async function runMonitorTests() {
     assert(findings.length === 0, 'Should return empty without trustedDepDiff/monitorMode flag');
   });
 
+  await asyncTest('MONITOR: scanTrustedDepDiff makes no registry request when MUADDIB_NO_REGISTRY_FETCH=1', async () => {
+    const https = require('https');
+    const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tdd-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'tdd-offline-probe', version: '1.0.1', dependencies: { x: '1' } }));
+    const origGet = https.get;
+    const prev = process.env.MUADDIB_NO_REGISTRY_FETCH;
+    let calls = 0;
+    // Any request fails at once: the scanner never rejects, so the call count is the observable.
+    https.get = (...args) => {
+      calls++;
+      const { EventEmitter } = require('events');
+      const req = new EventEmitter(); req.destroy = () => {}; req.end = () => {};
+      setImmediate(() => req.emit('error', new Error('offline stub')));
+      return req;
+    };
+    try {
+      process.env.MUADDIB_NO_REGISTRY_FETCH = '1';
+      const off = await scanTrustedDepDiff(tmp, { monitorMode: true });
+      assert(calls === 0 && off.length === 0, `offline: expected no request, got ${calls}`);
+      delete process.env.MUADDIB_NO_REGISTRY_FETCH;
+      await scanTrustedDepDiff(tmp, { monitorMode: true });
+      assert(calls > 0, 'online (negative control): the scanner must try the registry');
+    } finally {
+      https.get = origGet;
+      if (prev === undefined) delete process.env.MUADDIB_NO_REGISTRY_FETCH; else process.env.MUADDIB_NO_REGISTRY_FETCH = prev;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   await asyncTest('MONITOR: scanTrustedDepDiff skips non-npm ecosystems', async () => {
     const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
     const findings = await scanTrustedDepDiff('.', { monitorMode: true, ecosystem: 'pypi', name: 'foo', version: '1.0.0' });

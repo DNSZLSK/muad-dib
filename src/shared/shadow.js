@@ -55,8 +55,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { dataPath } = require('./data-dir.js');
 
-const DEFAULT_SHADOW_FILE = path.join(__dirname, '..', '..', 'data', 'shadow-divergence.jsonl');
+const DEFAULT_SHADOW_FILE = dataPath('shadow-divergence.jsonl');
 const DEFAULT_MAX_ENTRIES = 50_000;
 const EVIDENCE_MAX_BYTES = 2048;
 // Count lines (cheap streaming pass) only every N appends, not on every write.

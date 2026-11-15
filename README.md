@@ -379,7 +379,7 @@ npm test
 
 ### Testing
 
-- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->171<!--/stat:testFiles--> modular test files
+- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->172<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground-truth replay** - non-regression suite of attack samples, mostly reconstructions (96 at v2.11.48: 95.74% at score >= 3, 88.30% at score >= 20, on 94 in-scope)

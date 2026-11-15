@@ -50,10 +50,10 @@
  */
 
 const fs = require('fs');
-const path = require('path');
+const { dataPath } = require('../shared/data-dir.js');
 
 const STALL_LOG_FILE = process.env.MUADDIB_LOOP_STALL_FILE
-  || path.join(__dirname, '..', '..', 'data', 'loop-stalls.jsonl');
+  || dataPath('loop-stalls.jsonl');
 const STALL_LOG_MAX_BYTES = 256 * 1024; // bounded: truncate-then-append past this
 
 // Threshold 5s: far above normal GC/IO jitter (sub-100ms) and a full scan's

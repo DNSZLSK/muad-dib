@@ -95,6 +95,9 @@ function localActionUse(targetPath, uses, input) {
   try { doc = yaml.load(content, { schema: yaml.JSON_SCHEMA }); } catch { return 'unknown'; }
   if (!doc || typeof doc !== 'object' || !doc.runs || typeof doc.runs !== 'object') return 'unknown';
   const esc = input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The input name comes from the scanned workflow but is fully escaped above, and the pattern
+  // has no nested quantifier: no injection, no catastrophic backtracking.
+  // eslint-disable-next-line security/detect-non-literal-regexp
   const ref = new RegExp(`\\$\\{\\{[^}]*\\binputs(?:\\.${esc}\\b|\\[\\s*['"]${esc}['"]\\s*\\])`);
   const using = String(doc.runs.using || '').toLowerCase();
   if (using === 'composite') {
