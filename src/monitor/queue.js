@@ -406,7 +406,8 @@ function recordTrainingSample(result, params) {
       sandbox: params.sandboxResult ? 'run' : 'none',
       source: 'scan',
       // AUDIT-A1: stamped on `result` in scanPackage (single source of truth)
-      firstPublish: !!(result && result._firstPublish)
+      firstPublish: !!(result && result._firstPublish),
+      staticMs: result ? result._staticMs : undefined
     });
   } catch (err) {
     // Non-fatal: ML export must never crash the monitor
@@ -1002,6 +1003,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     }
 
     let result;
+    let staticStart = 0;
     try {
       // scanContext: feeds monitor-side info (name/version/ecosystem) and the
       // monitorMode + trustedDepDiff flags into opt-in pipeline scanners.
@@ -1032,7 +1034,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       if (ecosystem === 'npm') scanContext.npmRegistryMeta = npmRegistryMeta;
       const archiveThreats = extractionFindings(extractReport);
       if (archiveThreats.length > 0) scanContext.extractionFindings = archiveThreats;
+      staticStart = Date.now();
       result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext, signal);
+      // Static scan time on the same clock as the STATIC_SCAN_TIMEOUT_MS kill (worker spawn
+      // to result), recorded in the scan ledger: the distribution any static-scan time bound
+      // must be calibrated on (download, extraction and sandbox are excluded).
+      result._staticMs = Date.now() - staticStart;
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
         console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated, kept INCONCLUSIVE not clean)`);
@@ -1046,7 +1053,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Ledger the inconclusive timeout — the 'static_timeout' outcome existed but was
         // emitted nowhere, so a parser-hang evasion vanished from coverage. Best-effort.
         try {
-          appendScanLedger({ name, version, ecosystem, outcome: 'static_timeout', source: 'static_timeout' });
+          appendScanLedger({ name, version, ecosystem, outcome: 'static_timeout', source: 'static_timeout',
+            staticMs: staticStart ? Date.now() - staticStart : null });
         } catch { /* ledger is best-effort */ }
         return { sandboxResult: null, staticClean: false };
       }
