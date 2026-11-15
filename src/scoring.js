@@ -562,7 +562,22 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   // BINSRC-002: a .woff2/.ttf loader is invoked out-of-band (a tasks.json folderOpen task, or a
   // require() of the font PATH), never through the JS import graph — reachability would wrongly
   // mark the carrier unreachable and downgrade it.
-  'text_payload_as_font_asset'
+  'text_payload_as_font_asset',
+  // Shai-Hulud 2.0 `discussion.yaml` backdoor (GHA-001): a workflow file is never require()d,
+  // so the import graph is the wrong lens. In a downloaded package it is an infection trace of
+  // the source repository (the worm republishes from infected repositories); in a repository
+  // checkout it runs. Measured 2026-11-15: 0 of the 3 242 validation packages carry it.
+  'shai_hulud_backdoor'
+]);
+
+// Workflow findings (GHA-002..004): full severity only when the scanned tree is a repository
+// checkout, whose workflows run as its CI. In a downloaded package they are inert for the
+// consumer and keep the unreachable downgrade (15 / 7 packages of the validation sample carry
+// workflow_injection / unpinned_action_in_risky_workflow, all downloaded packages).
+// unpinned_action (a mutable tag) is a hygiene finding, emitted LOW by the scanner: left out.
+const REPOSITORY_WORKFLOW_TYPES = new Set([
+  'workflow_pwn_request', 'workflow_injection', 'workflow_secrets_dump',
+  'unpinned_action_in_risky_workflow'
 ]);
 
 // ============================================
@@ -1199,7 +1214,12 @@ function applyStringIocCorroboration(threats) {
   return { outcome: 'uncorroborated' };
 }
 
-function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions) {
+/**
+ * @param {Object} [context]
+ * @param {boolean} [context.repositoryCheckout] - the scanned tree is a git checkout whose
+ *   workflows run (CLI / GitHub Action on a repository), not a downloaded package.
+ */
+function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions, context = {}) {
   // Initialize reductions audit trail on each threat
   // Store original severity before any FP reductions, so compound
   // severity gates can check pre-reduction severity (GAP 4b).
@@ -1480,6 +1500,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
     const isDtsFile = t.file && t.file.endsWith('.d.ts');
     if (reachableFiles && reachableFiles.size > 0 && t.file &&
         !REACHABILITY_EXEMPT_TYPES.has(t.type) &&
+        !(context.repositoryCheckout && REPOSITORY_WORKFLOW_TYPES.has(t.type)) &&
         !isPackageLevelThreat(t) && !isDtsFile) {
       const normalizedFile = t.file.replace(/\\/g, '/');
       if (!reachableFiles.has(normalizedFile) && !_filesWithExemptThreats.has(normalizedFile)) {

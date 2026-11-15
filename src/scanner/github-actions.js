@@ -19,11 +19,45 @@
 
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
 
 const { getMaxFileSize } = require('../shared/constants.js');
 
 const YAML_EXTENSIONS = ['.yml', '.yaml'];
 const MAX_DEPTH = 10;
+
+// The code a workflow or composite action executes with expressions expanded in place: each
+// step's `run:` script and the `script:` input of actions/github-script. An expression there
+// is substituted into the code before it runs (script injection). Passed through `env:` (the
+// mitigation GitHub documents) or as an input of another action, it is data. Returns null when
+// the file is not a parsable workflow / action: the caller then keeps the whole-file match.
+function executedScripts(content) {
+  let doc;
+  try {
+    doc = yaml.load(content, { schema: yaml.JSON_SCHEMA });
+  } catch {
+    return null;
+  }
+  if (!doc || typeof doc !== 'object') return null;
+  const stepLists = [];
+  if (doc.jobs && typeof doc.jobs === 'object') {
+    for (const job of Object.values(doc.jobs)) if (job && Array.isArray(job.steps)) stepLists.push(job.steps);
+  }
+  if (doc.runs && Array.isArray(doc.runs.steps)) stepLists.push(doc.runs.steps);
+  if (stepLists.length === 0) return null;
+  const scripts = [];
+  for (const steps of stepLists) {
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue;
+      if (typeof step.run === 'string') scripts.push(step.run);
+      if (typeof step.uses === 'string' && /^actions\/github-script@/i.test(step.uses) &&
+          step.with && typeof step.with.script === 'string') {
+        scripts.push(step.with.script);
+      }
+    }
+  }
+  return scripts;
+}
 
 function scanGitHubActions(targetPath) {
   const threats = [];
@@ -103,8 +137,13 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
         { regex: /\$\{\{\s*github\.head_ref/, msg: 'github.head_ref is attacker-controlled in pull_request workflows' }
       ];
 
+      // Matched only in executed code (run / github-script) when the file parses; a value
+      // passed through env: is the documented mitigation, not an injection. Unparsable file:
+      // whole-file match, as before.
+      const scripts = executedScripts(content);
+      const injectionScope = scripts === null ? [activeContent] : scripts;
       for (const { regex, msg } of injectionPatterns) {
-        if (regex.test(activeContent)) {
+        if (injectionScope.some(s => regex.test(s))) {
           fileHasInjection = true;
           threats.push({
             type: 'workflow_injection',
