@@ -65,6 +65,14 @@ let _lastScaleDirection = 0; // +1 = scaled up, -1 = scaled down, 0 = stable
 let _plateauStreak = 0;      // consecutive windows where throughput didn't improve after scale-up
 const PLATEAU_STREAK_REQUIRED = 2; // must see flat throughput N times before triggering
 
+// Scans that ran out of time: killed at the 45 s worker limit (static_timeout) or stopped at the
+// monitor soft deadline (softDeadlineHits, src/shared/scan-budget.js). Both mean the host is too
+// slow for its load; counting the soft-deadline stops keeps this signal now that most of those
+// scans finish instead of being killed (it also counts the 30-45 s scans, so it reacts earlier).
+function slowScans(stats) {
+  return ((stats.errorsByType && stats.errorsByType.static_timeout) || 0) + (stats.softDeadlineHits || 0);
+}
+
 /**
  * Compute new target concurrency from system signals.
  * Uses stats deltas (not cumulative) for timeout rate — avoids stale data.
@@ -85,13 +93,13 @@ function computeTarget(current, queueDepth, stats) {
     if (heapPressure >= MEMORY_PRESSURE_LEVELS.HIGH) {
       const target = clamp(MIN_CONCURRENCY);
       _prevScanned = stats.scanned || 0;
-      _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+      _prevTimeouts = slowScans(stats);
       return { target, reason: `heap_pressure_high (level=${heapPressure}, dropping to min=${MIN_CONCURRENCY})` };
     }
     if (heapPressure >= MEMORY_PRESSURE_LEVELS.ELEVATED) {
       const target = clamp(Math.min(current, BASE_CONCURRENCY));
       _prevScanned = stats.scanned || 0;
-      _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+      _prevTimeouts = slowScans(stats);
       return { target, reason: `heap_elevated (level=${heapPressure}, capping at base=${BASE_CONCURRENCY})` };
     }
   } catch { /* daemon.js not loaded yet on first tick — proceed with system RAM check */ }
@@ -105,14 +113,14 @@ function computeTarget(current, queueDepth, stats) {
   if (freeRatio < MEMORY_FREE_THRESHOLD) {
     const target = clamp(current - 4);
     _prevScanned = stats.scanned || 0;
-    _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+    _prevTimeouts = slowScans(stats);
     const freeMB = Math.round(freeMem / 1024 / 1024);
     return { target, reason: `memory_pressure (${freeMB}MB free, ${(freeRatio * 100).toFixed(0)}%)` };
   }
 
   // Compute timeout rate from stats deltas (sliding window between adjustments)
   const scannedNow = stats.scanned || 0;
-  const timeoutsNow = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+  const timeoutsNow = slowScans(stats);
   const scannedDelta = scannedNow - _prevScanned;
   const timeoutDelta = timeoutsNow - _prevTimeouts;
   _prevScanned = scannedNow;

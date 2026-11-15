@@ -50,6 +50,13 @@ function parseFile(filePath) {
   const budget = _workBudget;
   if (budget && budget.used >= budget.limit) {
     budget.exhausted = true;
+    budget.reason = 'work-budget';
+    return null;
+  }
+  // Monitor only: soft deadline before the scan worker is killed (shared/scan-budget.js).
+  if (budget && Number.isFinite(budget.deadline) && Date.now() >= budget.deadline) {
+    budget.exhausted = true;
+    budget.reason = 'deadline';
     return null;
   }
   let content;

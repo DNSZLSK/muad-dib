@@ -21,6 +21,7 @@ const path = require('path');
 const { findFiles, forEachSafeFile } = require('../utils.js');
 const { markIncomplete } = require('../shared/completeness.js');
 const { budgetOrder } = require('../shared/analyze-helper.js');
+const { readBudget, budgetStop, stopDetails } = require('../shared/scan-budget.js');
 
 const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__tests__', '__test__', 'dist', 'build'];
 
@@ -219,17 +220,15 @@ function scanEntropy(targetPath, options = {}) {
 
   const safeFiles = files.filter(f => !shouldSkipFile(f));
   // Work budget in source characters (architecture lot 2), deterministic: see analyze-helper.js.
-  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
+  const budget = readBudget(options);
   let analyzedChars = 0;
-  let overBudget = false;
+  let stopReason = null;
   // Executed files first, closest to an entry point first (budgetOrder); findings are
   // reassembled in the original file order, so the output only changes when the budget is hit.
   const perFile = new Map();
   forEachSafeFile(budgetOrder(targetPath, safeFiles).map(o => o.file), (file, content) => {
-    if (byteBudget !== null && analyzedChars >= byteBudget) {
-      overBudget = true;
-      return;
-    }
+    stopReason = budgetStop(budget, analyzedChars);
+    if (stopReason) return;
     analyzedChars += content.length;
     const out = [];
     perFile.set(file, out);
@@ -303,10 +302,10 @@ function scanEntropy(targetPath, options = {}) {
         file: relativePath
       });
     }
-  }, { shouldStop: () => overBudget });
+  }, { shouldStop: () => stopReason !== null });
   for (const f of safeFiles) if (perFile.has(f)) threats.push(...perFile.get(f));
 
-  if (overBudget) markIncomplete('scanEntropy', 'work-budget', { limit: byteBudget, observed: analyzedChars });
+  if (stopReason) markIncomplete('scanEntropy', stopReason, stopDetails(stopReason, budget, analyzedChars));
   return threats;
 }
 

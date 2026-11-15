@@ -80,7 +80,8 @@ async function analyzeAST(targetPath, options = {}) {
     deobfuscate: options.deobfuscate,
     excludedFiles: EXCLUDED_FILES,
     component: 'analyzeAST',
-    byteBudget: options.byteBudget
+    byteBudget: options.byteBudget,
+    deadline: options.deadline
   });
 }
 

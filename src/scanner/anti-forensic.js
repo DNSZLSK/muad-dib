@@ -55,6 +55,7 @@ const { findFiles } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { markIncomplete } = require('../shared/completeness.js');
 const { budgetOrder } = require('../shared/analyze-helper.js');
+const { readBudget, budgetStop, stopDetails } = require('../shared/scan-budget.js');
 
 const SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs'];
 const DECOY_EXT_RE = /\.(?:md|bak|tmp|txt|log)$/i;
@@ -217,7 +218,7 @@ async function scanAntiForensic(targetPath, options = {}) {
   if (!fs.existsSync(targetPath)) return threats;
   // Work budget in source characters (architecture lot 2), deterministic: see analyze-helper.js.
   // Only the files that pass the cheap pre-filter below are parsed, so only they count.
-  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
+  const budget = readBudget(options);
   let analyzedChars = 0;
   let fileErrors = 0;
 
@@ -242,8 +243,9 @@ async function scanAntiForensic(targetPath, options = {}) {
     // Cheap pre-filter: skip files that have no `^` operator and no fs.unlink/rename
     // call. Avoids parsing benign minified bundles.
     if (!/[^=!<>]\^[^=]/.test(content) && !/\b(?:unlink|rename)(?:Sync)?\b/.test(content)) continue;
-    if (byteBudget !== null && analyzedChars >= byteBudget) {
-      markIncomplete('scanAntiForensic', 'work-budget', { limit: byteBudget, observed: analyzedChars });
+    const stopReason = budgetStop(budget, analyzedChars);
+    if (stopReason) {
+      markIncomplete('scanAntiForensic', stopReason, stopDetails(stopReason, budget, analyzedChars));
       break;
     }
     analyzedChars += content.length;

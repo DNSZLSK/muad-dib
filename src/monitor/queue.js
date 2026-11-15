@@ -355,6 +355,21 @@ const SCAN_WORKER_PATH = path.join(__dirname, '..', 'scan-worker.js');
 
 // --- Functions ---
 
+/**
+ * Monitor decision for a scan stopped by the soft deadline (src/shared/scan-budget.js).
+ * @returns {null|'alert'|'inconclusive'} null: not stopped by the deadline (normal path);
+ *   'alert': the partial findings already classify the package as suspect T1a / T1b / T2;
+ *   'inconclusive': anything else, never a clean verdict (recorded like a static timeout).
+ */
+function softDeadlineDecision(result) {
+  const hit = !!(result && result.analysis && Array.isArray(result.analysis.incomplete) &&
+    result.analysis.incomplete.some(e => e && e.reason === 'deadline'));
+  if (!hit) return null;
+  if (!result.summary || !(result.summary.total > 0) || isBundledToolingOnly(result.threats)) return 'inconclusive';
+  const c = isSuspectClassification(result);
+  return c.suspect && c.tier !== 3 ? 'alert' : 'inconclusive';
+}
+
 function isBundledToolingOnly(threats) {
   if (threats.length === 0) return false;
   return threats.every(t => {
@@ -1096,6 +1111,28 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       isFirstPublishHighRisk(cacheTrigger, npmRegistryMeta) &&
       isSandboxEnabled() && sandboxAvailable &&
       scanQueue.length < FIRST_PUBLISH_SANDBOX_MAX_QUEUE;
+
+    // Soft deadline (src/shared/scan-budget.js): the heavy scanners stopped before the end, so
+    // the findings are partial. Partial findings that are enough to classify the package as
+    // suspect (T1a, T1b, T2) take the normal alert path below. Anything else must NOT become a
+    // clean verdict or a clean training sample: it is recorded like a static timeout, the
+    // outcome these scans had before the deadline existed (no verdict, kept INCONCLUSIVE).
+    const deadlineDecision = softDeadlineDecision(result);
+    if (deadlineDecision !== null) {
+      stats.softDeadlineHits = (stats.softDeadlineHits || 0) + 1;
+      if (deadlineDecision === 'inconclusive') {
+        stats.scanned++;
+        stats.totalTimeMs += Date.now() - startTime;
+        console.error(`[MONITOR] SOFT_DEADLINE: ${name}@${version} - partial scan below the alert classification (score ${result.summary.riskScore}), kept INCONCLUSIVE not clean`);
+        updateScanStats('sandbox_inconclusive');
+        try {
+          appendScanLedger({ name, version, ecosystem, outcome: 'static_timeout', source: 'soft_deadline',
+            score: result.summary.riskScore, analysisStatus: result.summary.analysisStatus,
+            types: [...new Set((result.threats || []).map(t => t.type))] });
+        } catch { /* ledger is best-effort */ }
+        return { sandboxResult: null, staticClean: false };
+      }
+    }
 
     if (result.summary.total === 0) {
       if (firstPublishSandbox) {
@@ -2423,6 +2460,7 @@ module.exports = {
 
   // Functions
   isBundledToolingOnly,
+  softDeadlineDecision,
   recordTrainingSample,
   countPackageFiles,
   measureJsWeight,

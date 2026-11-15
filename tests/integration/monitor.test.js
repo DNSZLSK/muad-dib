@@ -8128,6 +8128,17 @@ async function runMonitorTests() {
     assertIncludes(reason, 'timeout_rate', 'Reason should mention timeout rate');
   });
 
+  test('ADAPTIVE: soft-deadline stops count as slow scans for the timeout rate', () => {
+    // Scans that stop at the monitor soft deadline no longer reach the 45 s kill, so they no
+    // longer show up as static_timeout: without them the overload signal would vanish.
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    computeTarget(16, 500, { scanned: 0, errorsByType: { static_timeout: 0 }, softDeadlineHits: 0 });
+    const { target, reason } = computeTarget(16, 500, { scanned: 25, errorsByType: { static_timeout: 0 }, softDeadlineHits: 5 });
+    assert(target === 14, `Should reduce from 16 to 14 on soft-deadline stops, got ${target}`);
+    assertIncludes(reason, 'timeout_rate', 'Reason should mention timeout rate');
+  });
+
   test('ADAPTIVE: computeTarget stays stable when queue is moderate', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();

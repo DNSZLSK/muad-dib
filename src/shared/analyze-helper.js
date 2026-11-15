@@ -21,6 +21,7 @@ const path = require('path');
 const { isDevFile, findJsFiles, forEachSafeFile } = require('../utils.js');
 const { looksBinaryString } = require('./binary-sniff.js');
 const { markIncomplete } = require('./completeness.js');
+const { readBudget, budgetStop, stopDetails } = require('./scan-budget.js');
 
 // Files reachable from the package entry points (main, bin, exports, module, browser,
 // lifecycle targets, and what they require or spawn) are EXECUTED code, so the dev-file
@@ -90,7 +91,7 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   const files = findJsFiles(targetPath);
   const executed = executedFiles(targetPath);
   const component = options.component || 'analyzeWithDeobfuscation';
-  const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
+  const budget = readBudget(options);
 
   // Work budget (architecture lot 2). The scanners are synchronous, so a timer cannot
   // interrupt them, and a clock would make the verdict depend on the machine: the budget is
@@ -99,25 +100,23 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   // with large decoy files cannot push the code that runs past the budget. Findings are
   // reassembled in the original file order, so the output does not depend on the
   // processing order. The hard wall-clock bound is one level up (hard-timeout.js, monitor
-  // worker).
+  // worker); in the monitor only, a soft deadline before that kill (scan-budget.js).
   const order = budgetOrder(targetPath, files);
   const indexOf = new Map(order.map(o => [o.file, o.index]));
   const perFile = new Array(files.length);
   let analyzedChars = 0;
-  let overBudget = false;
+  let stopReason = null;
   let fileErrors = 0;
   // Once a file that would have been analyzed is skipped, the remaining files are not even read.
-  const shouldStop = () => overBudget;
+  const shouldStop = () => stopReason !== null;
 
   forEachSafeFile(order.map(o => o.file), (file, content) => {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
 
     if (options.excludedFiles && options.excludedFiles.includes(relativePath)) return;
     if (options.skipDevFiles !== false && isDevFile(relativePath) && !executed.has(relativePath)) return;
-    if (byteBudget !== null && analyzedChars >= byteBudget) {
-      overBudget = true;
-      return;
-    }
+    stopReason = budgetStop(budget, analyzedChars);
+    if (stopReason) return;
 
     // .d.ts files: strip TypeScript declaration syntax before JS parsing.
     // Legitimate .d.ts files contain only type declarations (no executable code).
@@ -180,8 +179,8 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
     perFile[indexOf.get(file)] = out;
   }, { shouldStop });
 
-  if (overBudget) {
-    markIncomplete(component, 'work-budget', { limit: byteBudget, observed: analyzedChars });
+  if (stopReason) {
+    markIncomplete(component, stopReason, stopDetails(stopReason, budget, analyzedChars));
   }
   if (fileErrors > 0) {
     markIncomplete(component, 'file-error', { observed: fileErrors });

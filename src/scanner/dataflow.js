@@ -276,7 +276,8 @@ async function analyzeDataFlow(targetPath, options = {}) {
   return analyzeWithDeobfuscation(targetPath, analyzeFile, {
     deobfuscate: options.deobfuscate,
     component: 'analyzeDataFlow',
-    byteBudget: options.byteBudget
+    byteBudget: options.byteBudget,
+    deadline: options.deadline
   });
 }
 
