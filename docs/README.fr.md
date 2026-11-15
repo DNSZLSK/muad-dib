@@ -331,7 +331,7 @@ muaddib replay
 muaddib ground-truth
 ```
 
-Rejoue des attaques supply-chain réelles contre le scanner pour valider la couverture de détection. Résultat actuel (mesure v2.11.48) : **90/94 détectées (95.74% TPR@3)** sur **96 samples** enrichis (94 actifs, 2 hors-scope : GT-005 colors et GT-009 faker, protestware avec min_threats=0). Enrichissement 2026-05-25 : +22 samples (16 synthétiques pour les règles PYSRC/PYAST/AST-092/AICONF-004/PKG-022, 6 tarballs réels depuis l'archive VPS, 7 reconstructions depuis le benchmark `data/all-review-results.json`). 13 samples PyPI (était 0). **TPR@20 : 88.30%** (83/94, +3.1pp vs v2.11.47 grâce au compound Track D `recon_exfil_direct_ip` qui ferme la gap GT-095).
+Rejoue des échantillons d'attaques supply-chain contre le scanner pour vérifier, après chaque changement, que les formes d'attaque connues restent détectées. C'est une suite de non-régression, pas une mesure de la détection sur du malware réel publié : les 99 échantillons actuels sont 16 fixtures synthétiques, 69 reconstructions d'attaques documentées et 14 échantillons tirés de paquets réels de 2026, petits (médiane 3 fichiers, 2,6 Ko) et écrits en même temps que les règles qui les détectent. Résultat actuel (mesure v2.11.48) : **90/94 détectées (95.74% TPR@3)** sur **96 samples** enrichis (94 actifs, 2 hors-scope : GT-005 colors et GT-009 faker, protestware avec min_threats=0). Enrichissement 2026-05-25 : +22 samples (16 synthétiques pour les règles PYSRC/PYAST/AST-092/AICONF-004/PKG-022, 6 tarballs réels depuis l'archive VPS, 7 reconstructions depuis le benchmark `data/all-review-results.json`). 13 samples PyPI (était 0). **TPR@20 : 88.30%** (83/94, +3.1pp vs v2.11.47 grâce au compound Track D `recon_exfil_direct_ip` qui ferme la gap GT-095).
 
 4 misses incluent les 3 attaques browser-only (lottie-player, polyfill-io, trojanized-jquery) plus 1 autre.
 
@@ -684,7 +684,7 @@ MUAD'DIB 2.12.3 Scanner
 |   +-- Canary Tokens / Honey Tokens (sandbox)
 |
 +-- Validation & Observabilité (v2.1)
-|   +-- Ground Truth Dataset (96 attaques réelles, 94 in-scope, 95.74% TPR@3 v2.11.48)
+|   +-- Ground Truth Dataset (non-régression : 96 échantillons, surtout des reconstructions, 94 in-scope, 95.74% TPR@3 v2.11.48)
 |   +-- Logging Temps de Détection (first_seen, métriques lead time)
 |   +-- Suivi Taux FP (stats quotidiennes, taux faux positifs)
 |   +-- Décomposition Score (scoring explicable par règle)
@@ -746,7 +746,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Metrique | Resultat | Details |
 |----------|----------|---------|
 | **Wild TPR** (Datadog 17K) | **92.8%** (13 538/14 587 in-scope) | 17 922 packages. 3 335 sans JS (hors scope). Par categorie : compromised_lib 97.8%, malicious_intent 92.1% |
-| **TPR@3** (Ground Truth, mesure v2.11.48) | **95.74%** (90/94 in-scope) | Re-mesure complete sur le GT enrichi. **96 attaques reelles** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0). +22 samples 2026-05-25 (Track C synthetique PYSRC/PYAST/AST-092/AICONF-004/PKG-022, Track A 6 tarballs reels VPS, Track B 7 reconstructions du benchmark de revue). 13 samples PyPI (etait 0). |
+| **TPR@3** (Ground Truth, mesure v2.11.48) | **95.74%** (90/94 in-scope) | Rejeu du GT enrichi (non-régression). **96 echantillons d'attaques, surtout des reconstructions** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0). +22 samples 2026-05-25 (Track C synthetique PYSRC/PYAST/AST-092/AICONF-004/PKG-022, Track A 6 tarballs reels VPS, Track B 7 reconstructions du benchmark de revue). 13 samples PyPI (etait 0). |
 | **TPR@20** (Ground Truth, mesure v2.11.48) | **88.30%** (83/94 in-scope) | Seuil alerte = 20 (threshold operationnel). **+3.1pp vs v2.11.47** grace au compound Track D `recon_exfil_direct_ip` (MUADDIB-COMPOUND-016, sameFile) qui ferme la gap GT-095 (risk 3→50) et `linux_fingerprint_exec` (AST-093) qui boost GT-091 byvendors / GT-092 heloo131313. 2 samples `tpr3-only` restants par design (GT-072, GT-077). |
 | **FPR rules** (Benign curated, mesure v2.11.48) | **1.10%** (6/545 scannes, 548 total) | **Inchange apres Track D** — le compound + types nouveaux ont cree zero FP supplementaire (gate sameFile + filtre IP-publique-only). Chute depuis 15.6% (v2.10.95) attribuable aux FP caps F1-F14 (v2.10.97 → v2.11.31) compounded sur 11 versions. Les 6 FP restants sont reels (meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid). **C'est le chiffre operationnel** — ce qu'un operateur obtient via `muaddib scan` (rules + FP caps, sans ML). |
 | **FPR** (Benign random, mesure v2.11.48) | **2.50%** (5/200) | 200 packages npm aleatoires, echantillonnage stratifie. Baisse depuis 7.0% (v2.10.95). |
@@ -793,7 +793,7 @@ Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benc
 | v5 | 50% (5/10) | Dataflow inter-module (nouveau scanner) |
 
 - **Wild TPR** (Benchmark Datadog) : taux de detection sur 17 922 packages malveillants reels du [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset). Wild TPR **92.8%** (13 538/14 587 in-scope). 3 335 packages sans fichiers JS exclus comme hors scope. Par categorie : compromised_lib 97.8%, malicious_intent 92.1%. Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark).
-- **TPR** (True Positive Rate) : taux de detection sur **96 attaques supply-chain reelles** (event-stream, ua-parser-js, coa, flatmap-stream, eslint-scope, solana-web3js, react-emits, TrapDoor build-scripts-utils + project-init-tools + async-pipeline-builder, defi-threat-scanner, @cseo-hr/trpweb-shared, marginfi cluster, byvendors, heloo131313, vite-json-config, et 80+ autres). 4 misses : browser-only (lottie-player, polyfill-io, trojanized-jquery) plus 1 autre — voir [Threat Model](docs/threat-model.md).
+- **TPR** (True Positive Rate) : taux de detection au rejeu des **96 echantillons du ground truth** (non-régression, surtout des reconstructions d'attaques reelles) (event-stream, ua-parser-js, coa, flatmap-stream, eslint-scope, solana-web3js, react-emits, TrapDoor build-scripts-utils + project-init-tools + async-pipeline-builder, defi-threat-scanner, @cseo-hr/trpweb-shared, marginfi cluster, byvendors, heloo131313, vite-json-config, et 80+ autres). 4 misses : browser-only (lottie-player, polyfill-io, trojanized-jquery) plus 1 autre - voir [Threat Model](docs/threat-model.md).
 - **FPR** (False Positive Rate) : packages avec score > 20 sur 532 packages npm reels (code source scanne, pas des dirs vides). Le 6.2% sur les packages standard (<10 fichiers JS, 290 packages) est la metrique la plus representative pour un usage typique — la plupart des packages npm sont petits.
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 107 samples malveillants evasifs — 67 adversariaux (7 vagues red team) + 40 holdouts (4 batches de 10). 107 disponibles sur disque, seuil global=20.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
@@ -865,7 +865,7 @@ npm test
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 14 587 packages malveillants in-scope, 92.8% Wild TPR (13 538/14 587 in-scope, 3 335 hors scope sans JS). compromised_lib 97.8%, malicious_intent 92.1%
 - **107 samples adversariaux/holdout** - 67 adversariaux + 40 holdouts, 103/107 taux de detection sur samples disponibles (96.3% ADR, seuil global=20)
-- **Validation ground truth** (mesure v2.11.48) - **96 attaques reelles** (90/94 in-scope detectees = 95.74% TPR@3, 83/94 = 88.30% TPR@20, +3.1pp via Track D). 2 hors scope : GT-005 colors, GT-009 faker (protestware min_threats=0). +22 samples 2026-05-25 (Tracks C/A/B). Les 4 misses incluent les 3 browser-only (lottie-player, polyfill-io, trojanized-jquery) plus 1 autre
+- **Rejeu du ground truth** (non-régression, mesure v2.11.48) - **96 echantillons, surtout des reconstructions** (90/94 in-scope detectees = 95.74% TPR@3, 83/94 = 88.30% TPR@20, +3.1pp via Track D). 2 hors scope : GT-005 colors, GT-009 faker (protestware min_threats=0). +22 samples 2026-05-25 (Tracks C/A/B). Les 4 misses incluent les 3 browser-only (lottie-player, polyfill-io, trojanized-jquery) plus 1 autre
 - **Validation faux positifs** (mesure v2.11.48) - **1.10% FPR curated** (6/545 scannes, 548 total, inchange apres Track D), 2.50% FPR random (5/200), 9.68% FPR PyPI (12/124 sur 132 — premiere mesure honnete apres fix du downloader Track D, les 12 FP sont tous a score 25-35 = artefact cap-PyPI-35 cible par Track E). Chute majeure depuis 15.6% (v2.10.95) attribuable aux 14 contextual FP caps F1-F14 deployees v2.10.97 → v2.11.31. Le classifier ML est actuellement inactif dans le scan — voir section ML Classifier ci-dessus.
 - **Audit ESLint securite** - `eslint-plugin-security` avec 14 regles activees
 
