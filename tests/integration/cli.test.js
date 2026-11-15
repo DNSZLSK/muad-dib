@@ -488,10 +488,62 @@ async function runCliTests() {
     assert(typeof result.gitHooks === 'boolean', 'Should have gitHooks property');
   });
 
-  test('HOOKS: detectHookSystem detects git hooks directory', () => {
-    const { detectHookSystem } = require('../../src/hooks-init.js');
-    const result = detectHookSystem(path.join(__dirname, '..', '..'));
-    assert(result.gitHooks === true, 'Should detect .git/hooks directory');
+  // Builds its own repositories instead of inspecting the checkout the suite runs in: that
+  // checkout may be a linked worktree (`.git` is a file), where the hooks live in the
+  // common git directory.
+  test('HOOKS: detectHookSystem detects the hooks of a plain repository and of a linked worktree', () => {
+    const { detectHookSystem, resolveGitHooksDir } = require('../../src/hooks-init.js');
+    const { execFileSync } = require('child_process');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-wt-'));
+    const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', ...args], { cwd, stdio: 'pipe' });
+    try {
+      const main = path.join(root, 'main');
+      fs.mkdirSync(main);
+      git(main, 'init', '-q');
+      git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+      assert(detectHookSystem(main).gitHooks === true, 'plain repository: hooks detected');
+
+      const wt = path.join(root, 'wt');
+      git(main, 'worktree', 'add', '-q', '--detach', wt);
+      assert(fs.statSync(path.join(wt, '.git')).isFile(), 'premise: .git is a file in a linked worktree');
+      assert(detectHookSystem(wt).gitHooks === true, 'linked worktree: hooks detected');
+      assert(fs.realpathSync(resolveGitHooksDir(wt)) === fs.realpathSync(path.join(main, '.git', 'hooks')),
+        'linked worktree: hooks of the common git directory, got ' + resolveGitHooksDir(wt));
+
+      const plain = path.join(root, 'plain');
+      fs.mkdirSync(plain);
+      assert(detectHookSystem(plain).gitHooks === false, 'no .git: no hooks (negative)');
+      // A subdirectory of a repository is not a checkout root: never the parent's hooks.
+      const sub = path.join(main, 'sub');
+      fs.mkdirSync(sub);
+      assert(resolveGitHooksDir(sub) === null, 'subdirectory: not a checkout root (negative)');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  await asyncTest('HOOKS: init-hooks installs the pre-commit hook of a linked worktree in the common git directory', async () => {
+    const { initHooks, removeHooks } = require('../../src/hooks-init.js');
+    const { execFileSync } = require('child_process');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-wt-init-'));
+    const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', ...args], { cwd, stdio: 'pipe' });
+    const origLog = console.log;
+    try {
+      const main = path.join(root, 'main');
+      fs.mkdirSync(main);
+      git(main, 'init', '-q');
+      git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+      const wt = path.join(root, 'wt');
+      git(main, 'worktree', 'add', '-q', '--detach', wt);
+      console.log = () => {};
+      const ok = await initHooks(wt, { type: 'git' });
+      const hook = path.join(main, '.git', 'hooks', 'pre-commit');
+      console.log = origLog;
+      assert(ok === true, 'init-hooks must succeed in a linked worktree');
+      assert(fs.existsSync(hook) && /MUADDIB/.test(fs.readFileSync(hook, 'utf8')), 'hook written in the common hooks directory');
+      console.log = () => {};
+      await removeHooks(wt);
+      console.log = origLog;
+      assert(!fs.existsSync(hook), 'remove-hooks removes it from the same place');
+    } finally { console.log = origLog; fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   // ============================================
