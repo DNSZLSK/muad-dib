@@ -333,6 +333,44 @@ async function runScannerBudgetTests() {
     } finally { cleanup(quiet); cleanup(loud); }
   });
 
+  await asyncTest('BUDGET: the monitor anchors the soft deadline on the worker spawn, the clock of the kill', async () => {
+    const { runScanInWorker } = require('../../src/monitor/queue.js');
+    const stub = path.join(__dirname, '..', 'fixtures', 'stub-scan-worker.js');
+    const ctxOf = async (scanContext, timeoutMs) => {
+      const before = Date.now();
+      const r = await withEnv('MUADDIB_SCAN_WORKER_PATH', stub, () => runScanInWorker(os.tmpdir(), timeoutMs, scanContext));
+      return { ctx: r._ctx, before, after: Date.now() };
+    };
+    const a = await withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MARGIN_MS', undefined, () =>
+      ctxOf({ _stub: 'echo-context', monitorMode: true }, 45000));
+    assert(a.ctx.softDeadlineAt >= a.before + 38000 && a.ctx.softDeadlineAt <= a.after + 38000,
+      `default: spawn + 45 s - 7 s, got ${a.ctx.softDeadlineAt - a.before} ms after the call`);
+    const b = await withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MARGIN_MS', '10000', () =>
+      ctxOf({ _stub: 'echo-context', monitorMode: true }, 45000));
+    assert(b.ctx.softDeadlineAt >= b.before + 35000 && b.ctx.softDeadlineAt <= b.after + 35000, 'margin from the env');
+    const c = await withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MARGIN_MS', '999999', () =>
+      ctxOf({ _stub: 'echo-context', monitorMode: true }, 45000));
+    assert(c.ctx.softDeadlineAt >= c.before && c.ctx.softDeadlineAt <= c.after, 'a margin above the kill clamps to the spawn');
+    const d = await ctxOf({ _stub: 'echo-context' }, 45000);
+    assert(!('softDeadlineAt' in d.ctx), 'no deadline for a scan outside the monitor');
+  });
+
+  await asyncTest('BUDGET: the pipeline stops at the passed softDeadlineAt, not at its own fallback', async () => {
+    const dir = makePkg({ 'index.js': PAYLOAD });
+    try {
+      // Passed instant, generous fallback: the instant decides.
+      const late = await withEnv('MUADDIB_NO_REGISTRY_FETCH', '1', () =>
+        withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MS', '600000', () =>
+          runScanDirect(dir, { monitorMode: true, softDeadlineAt: Date.now() - 1 })));
+      assert(reasons(late).includes('analyzeAST/deadline'), 'passed instant stops the heavy scanners: ' + reasons(late).join(' '));
+      // Future instant, zero fallback: still the instant.
+      const early = await withEnv('MUADDIB_NO_REGISTRY_FETCH', '1', () =>
+        withEnv('MUADDIB_MONITOR_SOFT_DEADLINE_MS', '0', () =>
+          runScanDirect(dir, { monitorMode: true, softDeadlineAt: Date.now() + 600000 })));
+      assert(!reasons(early).some(x => /\/deadline$/.test(x)), 'future instant: no deadline stop: ' + reasons(early).join(' '));
+    } finally { cleanup(dir); }
+  });
+
   await asyncTest('BUDGET: outside the monitor the soft deadline does not exist (CLI stays deterministic)', async () => {
     const dir = makePkg({ 'index.js': PAYLOAD });
     try {

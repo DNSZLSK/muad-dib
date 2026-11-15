@@ -53,9 +53,10 @@ const DEFAULT_SCANNER_WORK_BUDGET = 32 * 1024 * 1024;
 // between COMPLETE and INCONCLUSIVE under the former 5 s clock), next 18.8 Mi; 5 to 10 Mi
 // per second. 32 Mi is about 1.4 times the largest benign package.
 const DEFAULT_MODULE_GRAPH_WORK_BUDGET = 32 * 1024 * 1024;
-// Monitor soft deadline, from the start of the scanner phase. The scan worker is killed at
-// 45 s (src/monitor/queue.js STATIC_SCAN_TIMEOUT_MS); 30 s leaves the processing time and
-// the light scanners room before that. Strict integer parse.
+// Monitor soft deadline. The monitor passes `softDeadlineAt`, an instant on the clock of the
+// 45 s worker kill (worker spawn, src/monitor/queue.js runScanInWorker), which is the one that
+// matters. This duration, counted from the start of the scanner phase, is only the fallback
+// for a monitorMode caller that passes no instant. Strict integer parse.
 const DEFAULT_MONITOR_SOFT_DEADLINE_MS = 30000;
 function monitorSoftDeadlineMs() {
   const raw = process.env.MUADDIB_MONITOR_SOFT_DEADLINE_MS;
@@ -221,7 +222,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // Monitor only: soft deadline for the heavy scanners and the module graph, before the
   // 45 s kill of the scan worker (a killed scan has no verdict). The CLI and the Action keep
   // the count-based budgets only, so their result does not depend on the machine.
-  const softDeadline = options.monitorMode ? Date.now() + monitorSoftDeadlineMs() : null;
+  const softDeadline = !options.monitorMode ? null
+    : (Number.isFinite(options.softDeadlineAt) ? options.softDeadlineAt : Date.now() + monitorSoftDeadlineMs());
 
   // No IOC database = known-malicious package detection did not run: the scan is INCONCLUSIVE
   // (lot 1 contract), never SAFE. Measured 2026-11-14: a fresh npm install of 2.12.2 scored a

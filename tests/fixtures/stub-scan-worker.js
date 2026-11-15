@@ -6,6 +6,7 @@
 //   'side-only'         → posts a side-channel message, then stays alive
 //                         (the static timeout must still fire)
 //   'result'            → posts a result immediately
+//   'echo-context'      → posts a result carrying the received scanContext (_ctx)
 const { parentPort, workerData } = require('worker_threads');
 
 const mode = (workerData && workerData.scanContext && workerData.scanContext._stub) || 'result';
@@ -24,6 +25,9 @@ if (mode === 'side-then-result') {
   // Keep the worker alive well past the test's short timeout so the ONLY way
   // the promise can settle is the timer (ref'd timeout, then exit cleanly).
   setTimeout(() => {}, 5000);
+} else if (mode === 'echo-context') {
+  // Soft-deadline tests: returns the scanContext the worker received.
+  parentPort.postMessage({ type: 'result', data: { ...RESULT, _ctx: workerData.scanContext } });
 } else {
   parentPort.postMessage({ type: 'result', data: RESULT });
 }

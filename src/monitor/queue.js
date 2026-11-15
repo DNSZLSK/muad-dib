@@ -207,6 +207,20 @@ function terminateAllWorkers() {
 }
 const SCAN_TIMEOUT_MS = 300_000; // 5 minutes per package (3 sandbox runs × 90s + static scan headroom)
 const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
+// Soft deadline of a monitor scan (src/shared/scan-budget.js): the heavy scanners stop at
+// worker spawn + STATIC_SCAN_TIMEOUT_MS - this margin, on the clock of the kill, so the light
+// scanners, the processing and the result message still fit before it.
+// PROVISIONAL VALUE: set from only ~1 h 40 of VPS ledger staticMs after the 2026-11-15 deploy
+// (4 425 timed scans: p99 36.1 s, 23 scans (0.5 %) above 40 s, 58 killed at 45 s; one result
+// seen at 48.2 s, i.e. the main thread can see a result ~3 s late). To be recomputed on 24 h
+// of production data before this change is enabled. MUADDIB_MONITOR_SOFT_DEADLINE_MARGIN_MS,
+// strict integer, kept below the kill.
+const DEFAULT_SOFT_DEADLINE_MARGIN_MS = 7_000;
+function softDeadlineMarginMs(timeoutMs) {
+  const raw = process.env.MUADDIB_MONITOR_SOFT_DEADLINE_MARGIN_MS;
+  const n = typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? parseInt(raw.trim(), 10) : DEFAULT_SOFT_DEADLINE_MARGIN_MS;
+  return Math.min(n, timeoutMs);
+}
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const RECENTLY_SCANNED_MAX = 50_000; // FIFO cap for the dedup Set (P0c — bounded resource)
 
@@ -666,11 +680,17 @@ function shouldSkipSandbox(ctx) {
  */
 function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = null) {
   return new Promise((resolve, reject) => {
+    // Monitor scans carry their soft-deadline instant, anchored here on the clock of the kill
+    // timer below (both start at the spawn), not on the start of the scanner phase inside the
+    // worker, which comes after a variable startup.
+    const ctx = scanContext && scanContext.monitorMode
+      ? { ...scanContext, softDeadlineAt: Date.now() + timeoutMs - softDeadlineMarginMs(timeoutMs) }
+      : (scanContext || {});
     const workerOpts = {
       // rateBrain: opts the worker's http-limiter into proxy mode (tokens and
       // 429s flow through the main-thread brain). ONLY scan workers get this —
       // any other Worker keeps a local bucket and can never hang on a missing brain.
-      workerData: { extractedDir, scanContext: scanContext || {}, rateBrain: true }
+      workerData: { extractedDir, scanContext: ctx, rateBrain: true }
     };
     // Per-worker V8 memory limits (OOM durable fix): the 2026-06 RSS spikes
     // (8.2-8.8GB with heap ~550MB) are off-heap allocations inside scan workers —
