@@ -50,6 +50,13 @@ function parseFile(filePath) {
   const budget = _workBudget;
   if (budget && budget.used >= budget.limit) {
     budget.exhausted = true;
+    budget.reason = 'work-budget';
+    return null;
+  }
+  // Monitor only: wall-clock bound on top of the work budget (src/pipeline/executor.js).
+  if (budget && Number.isFinite(budget.deadline) && Date.now() >= budget.deadline) {
+    budget.exhausted = true;
+    budget.reason = 'timeout';
     return null;
   }
   let content;
