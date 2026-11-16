@@ -53,6 +53,18 @@ const DEFAULT_SCANNER_WORK_BUDGET = 32 * 1024 * 1024;
 // between COMPLETE and INCONCLUSIVE under the former 5 s clock), next 18.8 Mi; 5 to 10 Mi
 // per second. 32 Mi is about 1.4 times the largest benign package.
 const DEFAULT_MODULE_GRAPH_WORK_BUDGET = 32 * 1024 * 1024;
+// Monitor only: the module graph also stops after this many milliseconds, whichever comes
+// first. The work budget is the same on every machine, so on a slower host it takes longer:
+// at 5 to 10 Mi per second on the measuring machine, 32 Mi is 3 to 6 s there and more on the
+// production host, all of it spent before the heavy scanners start, under the 45 s kill of the
+// scan worker. The former bound was a 5 s clock; this keeps it for the monitor. The CLI and
+// the GitHub Action keep the work budget alone, so their result does not depend on the
+// machine. MUADDIB_MONITOR_MODULE_GRAPH_MS, strict integer, 0 disables.
+const DEFAULT_MONITOR_MODULE_GRAPH_MS = 5000;
+function monitorModuleGraphMs() {
+  const raw = process.env.MUADDIB_MONITOR_MODULE_GRAPH_MS;
+  return typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? parseInt(raw.trim(), 10) : DEFAULT_MONITOR_MODULE_GRAPH_MS;
+}
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
@@ -264,7 +276,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // the step skips its remaining files and the next steps are skipped; the flows
     // already produced still go through the destination filter, and the analysis is
     // marked INCONCLUSIVE. Same input, same budget, same result on any machine.
-    const graphBudget = { limit: MODULE_GRAPH_WORK_BUDGET, used: 0, exhausted: false };
+    const graphMs = options.monitorMode ? monitorModuleGraphMs() : 0;
+    const graphBudget = { limit: MODULE_GRAPH_WORK_BUDGET, used: 0, exhausted: false, deadline: graphMs > 0 ? Date.now() + graphMs : null, reason: null };
     const step = (fn) => yieldThen(() => runWithWorkBudget(graphBudget, fn));
     const overBudget = () => graphBudget.exhausted;
     const moduleGraphWork = async () => {
@@ -333,8 +346,13 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     }
     debugLog(`[MODULE-GRAPH] work ${graphBudget.used} / ${MODULE_GRAPH_WORK_BUDGET} chars`);
     if (graphBudget.exhausted) {
-      markIncomplete('moduleGraph', 'work-budget', { limit: MODULE_GRAPH_WORK_BUDGET, observed: graphBudget.used });
-      warnings.push(`Module graph analysis stopped at its work budget (${MODULE_GRAPH_WORK_BUDGET} source characters): cross-file flows may be incomplete`);
+      if (graphBudget.reason === 'timeout') {
+        markIncomplete('moduleGraph', 'timeout', { limit: graphMs, observed: graphBudget.used });
+        warnings.push(`Module graph analysis stopped at its monitor time limit (${graphMs} ms): cross-file flows may be incomplete`);
+      } else {
+        markIncomplete('moduleGraph', 'work-budget', { limit: MODULE_GRAPH_WORK_BUDGET, observed: graphBudget.used });
+        warnings.push(`Module graph analysis stopped at its work budget (${MODULE_GRAPH_WORK_BUDGET} source characters): cross-file flows may be incomplete`);
+      }
     }
   }
 

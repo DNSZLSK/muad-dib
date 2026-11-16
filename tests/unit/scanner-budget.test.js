@@ -139,6 +139,44 @@ async function runScannerBudgetTests() {
     } finally { cleanup(dir); }
   });
 
+  // --- module graph: monitor time limit on top of the work budget ----------------
+
+  // 40 local modules chained by require: the graph steps read them several times, which takes
+  // well over 1 ms on any machine.
+  const graphFiles = () => {
+    const files = { 'index.js': PAYLOAD + "require('./m0.js');\n" };
+    for (let i = 0; i < 40; i++) {
+      files[`m${i}.js`] = (i < 39 ? `require('./m${i + 1}.js');\n` : '') +
+        `module.exports = function f${i}(x) { return [x, process.env.HOME, ${i}].join('-'); };\n`;
+    }
+    return files;
+  };
+  await asyncTest('BUDGET: in monitor mode the module graph stops at its time limit (moduleGraph/timeout)', async () => {
+    const dir = makePkg(graphFiles());
+    try {
+      const r = await withEnv('MUADDIB_MONITOR_MODULE_GRAPH_MS', '1', () => runScanDirect(dir, { monitorMode: true }));
+      assert(reasons(r).includes('moduleGraph/timeout'), 'moduleGraph/timeout expected: ' + reasons(r).join(' '));
+      assert(r.analysis.status === 'INCONCLUSIVE', 'status: ' + r.analysis.status);
+      assert(types(r).has('dangerous_exec'), 'the heavy scanners must still run after the graph stops');
+    } finally { cleanup(dir); }
+  });
+  await asyncTest('BUDGET: the module-graph time limit never applies outside the monitor (negative)', async () => {
+    const dir = makePkg(graphFiles());
+    try {
+      const r = await withEnv('MUADDIB_MONITOR_MODULE_GRAPH_MS', '1', () => runScanDirect(dir));
+      assert(!reasons(r).includes('moduleGraph/timeout'), 'CLI scan got a module-graph time limit: ' + reasons(r).join(' '));
+    } finally { cleanup(dir); }
+  });
+  await asyncTest('BUDGET: MUADDIB_MONITOR_MODULE_GRAPH_MS=0 disables it, malformed values keep the 5 s default', async () => {
+    const dir = makePkg(graphFiles());
+    try {
+      for (const value of ['0', '', 'abc', '-1', '1e3', '5ms']) {
+        const r = await withEnv('MUADDIB_MONITOR_MODULE_GRAPH_MS', value, () => runScanDirect(dir, { monitorMode: true }));
+        assert(!reasons(r).includes('moduleGraph/timeout'), `value ${JSON.stringify(value)} stopped the graph: ` + reasons(r).join(' '));
+      }
+    } finally { cleanup(dir); }
+  });
+
   // --- per-file isolation -------------------------------------------------------
 
   test('BUDGET: a file whose analysis throws costs only that file and marks file-error', () => {
