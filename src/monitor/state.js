@@ -1138,8 +1138,9 @@ function appendScanLedger(e) {
       // was INCONCLUSIVE, same lean-ledger rule as isBurstExtra. No routing change.
       ...(e.analysisStatus === 'INCONCLUSIVE' ? { analysisStatus: 'INCONCLUSIVE' } : {}),
       // Evaluation random sample (lot 7): every ledger outcome of a drawn package@version
-      // carries it, captured or not (timeout, error, size skip), so the sample's
-      // denominator and its non-captured part are both visible. Lean-ledger rule: only when true.
+      // carries it, captured or not (timeout, error, size skip, dropped, spilled), so the
+      // sample's non-captured part is visible. The denominator is the drawn versions that
+      // were scanned: 'dropped' / 'spilled' entries were not. Lean-ledger rule: only when true.
       ...(isEvalRandomSample(e.ecosystem, e.name, e.version) ? { evalSample: true } : {}),
       // Static scan time (worker spawn to result, the clock of the 45 s kill), for the scans
       // that ran one. Lets a static-scan time bound be calibrated on production data.

@@ -27,7 +27,9 @@
  * module draws a fixed fraction of ALL scanned packages, independently of the
  * score, so that the drawn set is an unbiased sample of the feed: its tarballs
  * are kept (tarball-archive.js captureForEvaluation) and the draw is written to
- * the scan ledger (evalSample: true), which gives the denominator.
+ * the scan ledger (evalSample: true) on every outcome. The denominator is the drawn
+ * versions that were scanned, once per name@version; drawn versions whose only
+ * outcome is 'dropped' or 'spilled' were never scanned and are counted apart.
  *
  * The draw is a keyed hash of ecosystem:name@version (HMAC-SHA256), so:
  *   - the same package@version gets the same answer in every thread and after a
@@ -111,18 +113,48 @@ function loadKey() {
  * @returns {boolean}
  */
 function isEvalRandomSample(ecosystem, name, version) {
+  return keyedDraw('', getEvalSampleRate(), ecosystem, name, version);
+}
+
+// Keyed draw in [0, 1) compared to rate. The label separates independent draws made
+// with the same key (the random sample uses the empty label, unchanged since its
+// introduction, so the ledger flag stays comparable across versions).
+function keyedDraw(label, rate, ecosystem, name, version) {
   try {
     if (!name || !version) return false;
-    const rate = getEvalSampleRate();
     if (rate <= 0) return false;
     if (rate >= 1) return true;
     const mac = crypto.createHmac('sha256', loadKey())
-      .update(`${ecosystem || ''}:${name}@${version}`)
+      .update(`${label}${ecosystem || ''}:${name}@${version}`)
       .digest();
     return mac.readUInt32BE(0) / 0x100000000 < rate;
   } catch {
     return false;
   }
+}
+
+/**
+ * Near-miss draw (score 1 to floor-1). Near misses arrive at about 9 GB of tarballs a
+ * day in production, so keeping the first ones until the daily byte budget runs out
+ * kept only the first hours of each day (budget reached at 05:27 Paris time on
+ * 2026-11-17). A keyed draw at a fixed rate spreads the kept near misses over the
+ * whole day; the byte budget stays as a safety net.
+ *
+ * Rate: MUADDIB_EVAL_NEAR_MISS_RATE, a fraction in [0, 1], default 0.2; same key as the
+ * random sample, independent draw (different label). Never throws.
+ */
+const DEFAULT_EVAL_NEAR_MISS_RATE = 0.2;
+
+function getEvalNearMissRate() {
+  const raw = process.env.MUADDIB_EVAL_NEAR_MISS_RATE;
+  if (raw === undefined || raw === '') return DEFAULT_EVAL_NEAR_MISS_RATE;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) return DEFAULT_EVAL_NEAR_MISS_RATE;
+  return n;
+}
+
+function isEvalNearMissSample(ecosystem, name, version) {
+  return keyedDraw('near_miss|', getEvalNearMissRate(), ecosystem, name, version);
 }
 
 function _resetKeyCacheForTests() {
@@ -134,5 +166,8 @@ module.exports = {
   isEvalRandomSample,
   getEvalSampleRate,
   DEFAULT_EVAL_SAMPLE_RATE,
+  isEvalNearMissSample,
+  getEvalNearMissRate,
+  DEFAULT_EVAL_NEAR_MISS_RATE,
   _resetKeyCacheForTests
 };

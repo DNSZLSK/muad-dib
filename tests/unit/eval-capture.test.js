@@ -178,7 +178,8 @@ async function runEvalCaptureTests() {
     const root = tmpDir('evalarch-');
     const work = tmpDir('evalwork-');
     try {
-      return await withEnv({ MUADDIB_ARCHIVE_DIR: root, MUADDIB_EVAL_SAMPLE_SALT: 'k5', ...env }, async () => {
+      // Near-miss rate 1 unless a test sets it: the other tests check what a kept near miss is.
+      return await withEnv({ MUADDIB_ARCHIVE_DIR: root, MUADDIB_EVAL_SAMPLE_SALT: 'k5', MUADDIB_EVAL_NEAR_MISS_RATE: '1', ...env }, async () => {
         const mod = freshArchive();
         mod._resetNearMissBudgetForTests();
         return await fn(mod, root, work);
@@ -280,6 +281,85 @@ async function runEvalCaptureTests() {
         }
         assert(kept.join() === '0,1,2', `1 MB budget holds three 300 KB near misses, kept ${kept.join()}`);
       } finally { console.warn = origWarn; }
+    });
+  });
+
+  await asyncTest('EVAL-NEAR-MISS: default rate 20 %, drawn fraction close to it, independent of the random sample', async () => {
+    await withEnv({ MUADDIB_EVAL_SAMPLE_SALT: 'k6', MUADDIB_EVAL_SAMPLE_RATE: '0.2', MUADDIB_EVAL_NEAR_MISS_RATE: undefined }, () => {
+      const s = freshSample();
+      assert(s.getEvalNearMissRate() === 0.2, `default near-miss rate 0.2, got ${s.getEvalNearMissRate()}`);
+      const N = 20000;
+      let nm = 0, both = 0;
+      for (let i = 0; i < N; i++) {
+        const a = s.isEvalNearMissSample('npm', `pkg-${i}`, '1.0.0');
+        const b = s.isEvalRandomSample('npm', `pkg-${i}`, '1.0.0');
+        if (a) nm++;
+        if (a && b) both++;
+      }
+      // Binomial(20000, 0.2): mean 4000, sd ~56.6; [3700, 4300] is about +-5 sd.
+      assert(nm >= 3700 && nm <= 4300, `near-miss drawn ${nm}/${N}, expected about 4000`);
+      // Independent draws at 0.2 x 0.2: mean 800, sd ~27.7. The same draw would give ~4000.
+      assert(both >= 650 && both <= 950, `overlap with the random sample ${both}, expected about 800 (independent draws)`);
+    });
+    for (const bad of ['-1', '2', 'x']) {
+      await withEnv({ MUADDIB_EVAL_NEAR_MISS_RATE: bad }, () => {
+        assert(freshSample().getEvalNearMissRate() === 0.2, `near-miss rate "${bad}" must fall back to 0.2`);
+      });
+    }
+  });
+
+  await asyncTest('EVAL-NEAR-MISS: rate 0 keeps no near miss, rate 0.2 keeps only the drawn ones', async () => {
+    await inArchive({ MUADDIB_EVAL_SAMPLE_RATE: '0', MUADDIB_EVAL_NEAR_MISS_RATE: '0' }, async (mod, root, work) => {
+      const tgz = fakeTgz(work);
+      for (let i = 0; i < 20; i++) {
+        const r = await withFreeSpace(AMPLE, () => mod.captureForEvaluation({ name: `z${i}`, version: '1.0.0', ecosystem: 'npm', tgzPath: tgz, score: 7, suspectKeepsTarball: false }));
+        assert(r === null, `rate 0: near miss z${i} not kept`);
+      }
+      assert(archivedFiles(root).length === 0, 'archive stays empty');
+    });
+    await inArchive({ MUADDIB_EVAL_SAMPLE_RATE: '0', MUADDIB_EVAL_NEAR_MISS_RATE: '0.2' }, async (mod, root, work) => {
+      const tgz = fakeTgz(work, 256);
+      const s = require(SAMPLE);
+      let kept = 0, drawn = 0;
+      for (let i = 0; i < 200; i++) {
+        const name = `d${i}`;
+        if (s.isEvalNearMissSample('npm', name, '1.0.0')) drawn++;
+        const r = await withFreeSpace(AMPLE, () => mod.captureForEvaluation({ name, version: '1.0.0', ecosystem: 'npm', tgzPath: tgz, score: 7, suspectKeepsTarball: false }));
+        if (r) {
+          kept++;
+          assert(s.isEvalNearMissSample('npm', name, '1.0.0'), `${name} kept but not drawn`);
+        }
+      }
+      assert(kept === drawn && kept > 0 && kept < 200, `kept ${kept}, drawn ${drawn}: exactly the drawn near misses`);
+    });
+  });
+
+  await asyncTest('EVAL-NEAR-MISS: a restarted process rebuilds the day budget from disk', async () => {
+    await inArchive({ MUADDIB_EVAL_SAMPLE_RATE: '0', MUADDIB_EVAL_NEAR_MISS_MAX_MB_PER_DAY: '1' }, async (mod, root, work) => {
+      const origWarn = console.warn; console.warn = () => {};
+      try {
+        for (let i = 0; i < 3; i++) {
+          const r = await withFreeSpace(AMPLE, () => mod.captureForEvaluation({ name: `before${i}`, version: '1.0.0', ecosystem: 'npm', tgzPath: fakeTgz(work, 300 * 1024), score: 9, suspectKeepsTarball: false }));
+          assert(r, `before restart: near miss ${i} kept`);
+        }
+        mod._resetNearMissBudgetForTests(); // the restart: in-memory budget gone, files stay
+        const fresh = freshArchive();
+        fresh._resetNearMissBudgetForTests();
+        const r = await withFreeSpace(AMPLE, () => fresh.captureForEvaluation({ name: 'after', version: '1.0.0', ecosystem: 'npm', tgzPath: fakeTgz(work, 300 * 1024), score: 9, suspectKeepsTarball: false }));
+        assert(r === null, `after restart: 900 KB already on disk, a 300 KB near miss exceeds 1 MB, got ${JSON.stringify(r)}`);
+      } finally { console.warn = origWarn; }
+    });
+    await inArchive({ MUADDIB_EVAL_SAMPLE_RATE: '1', MUADDIB_EVAL_NEAR_MISS_MAX_MB_PER_DAY: '1' }, async (mod, root, work) => {
+      // Random captures (even with a near-miss score) are outside the near-miss budget on disk too.
+      for (let i = 0; i < 4; i++) {
+        await withFreeSpace(AMPLE, () => mod.captureForEvaluation({ name: `rnd${i}`, version: '1.0.0', ecosystem: 'npm', tgzPath: fakeTgz(work, 300 * 1024), score: 9, suspectKeepsTarball: false }));
+      }
+      await withEnv({ MUADDIB_EVAL_SAMPLE_RATE: '0' }, async () => {
+        const fresh = freshArchive();
+        fresh._resetNearMissBudgetForTests();
+        const r = await withFreeSpace(AMPLE, () => fresh.captureForEvaluation({ name: 'nm-after', version: '1.0.0', ecosystem: 'npm', tgzPath: fakeTgz(work, 300 * 1024), score: 9, suspectKeepsTarball: false }));
+        assert(r && r.join() === 'near_miss', `1.2 MB of random captures must not use the near-miss budget, got ${JSON.stringify(r)}`);
+      });
     });
   });
 

@@ -274,9 +274,33 @@ function getEvalNearMissMaxBytes() {
   return mb * 1024 * 1024;
 }
 
-// Near-miss bytes captured today (in-process; a restart resets it, which can at most
-// double one day's budget).
+// Near-miss bytes captured today. Kept in memory, and rebuilt from the day directory
+// on the first capture of the day in this process: without that, a restart (an
+// OOM-kill restarted the service on 2026-11-17) granted a second full budget the
+// same day.
 const nearMissBudget = { day: null, bytes: 0, exhaustedLogged: false };
+
+// Bytes of near-miss-only captures already in dayDir: .tgz whose JSON lists
+// capture_reasons with 'near_miss' and without 'random'. Read once per day per
+// process (a day holds a few thousand records). Unreadable entries are skipped.
+// Paths: the archive day directory and the names it lists, nothing from a package.
+/* eslint-disable security/detect-non-literal-fs-filename */
+function nearMissBytesOnDisk(dayDir) {
+  let total = 0;
+  let names;
+  try { names = fs.readdirSync(dayDir); } catch { return 0; }
+  for (const f of names) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(dayDir, f), 'utf8'));
+      const reasons = meta && meta.capture_reasons;
+      if (!Array.isArray(reasons) || !reasons.includes('near_miss') || reasons.includes('random')) continue;
+      total += fs.statSync(path.join(dayDir, f.slice(0, -5) + '.tgz')).size;
+    } catch { /* unreadable record or missing tarball: not counted */ }
+  }
+  return total;
+}
+/* eslint-enable security/detect-non-literal-fs-filename */
 
 /**
  * Keep the tarball of a scanned package for evaluation when it is in the random
@@ -296,11 +320,12 @@ const nearMissBudget = { day: null, bytes: 0, exhaustedLogged: false };
 async function captureForEvaluation({ name, version, ecosystem, tgzPath, score, suspectKeepsTarball }) {
   try {
     if (!name || !version || !tgzPath || suspectKeepsTarball) return null;
-    const { isEvalRandomSample } = require('./eval-sample.js');
+    const { isEvalRandomSample, isEvalNearMissSample } = require('./eval-sample.js');
     const reasons = [];
     if (isEvalRandomSample(ecosystem, name, version)) reasons.push('random');
     const hasScore = typeof score === 'number' && Number.isFinite(score);
-    const isNearMiss = hasScore && score >= 1 && score < getArchiveTgzMinScore();
+    const isNearMiss = hasScore && score >= 1 && score < getArchiveTgzMinScore()
+      && isEvalNearMissSample(ecosystem, name, version);
     if (isNearMiss) reasons.push('near_miss');
     if (reasons.length === 0) return null;
 
@@ -311,7 +336,9 @@ async function captureForEvaluation({ name, version, ecosystem, tgzPath, score, 
     const nearMissOnly = !reasons.includes('random');
     if (nearMissOnly) {
       if (nearMissBudget.day !== dateStr) {
-        nearMissBudget.day = dateStr; nearMissBudget.bytes = 0; nearMissBudget.exhaustedLogged = false;
+        nearMissBudget.day = dateStr;
+        nearMissBudget.bytes = nearMissBytesOnDisk(path.join(ARCHIVE_DIR, dateStr));
+        nearMissBudget.exhaustedLogged = false;
       }
       if (nearMissBudget.bytes + size > getEvalNearMissMaxBytes()) {
         if (!nearMissBudget.exhaustedLogged) {
