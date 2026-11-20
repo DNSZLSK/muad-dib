@@ -301,6 +301,42 @@ function networkDestinationFirstParty(result, meta) {
 }
 
 /**
+ * Shared veto of the shape-based caps (F2 GitHub-release installer, F4 local git
+ * hook). Those caps recognize the SHAPE of a legitimate tool (binary download
+ * from GitHub, hook written from a local body); the shape
+ * says nothing about what the code does. TRUE when a finding shows behaviour no
+ * such tool needs:
+ *   - a signal of the bundle veto (src/shared/bundle-detect.js: reverse shell,
+ *     registry token theft, worm propagation, persistence, IOC hit...), the veto
+ *     the bundle downgrade of scoring.js already applies;
+ *   - a hard exfiltration type (HARD_EXFIL_TYPES), except the ones the cap is
+ *     built on (`exempt`);
+ *   - a credential file (.npmrc, SSH keys, cloud credentials...) named in a
+ *     finding, the C4/C6 veto of F9, F10 and F15.
+ * LOW findings are ignored, as in hasBundleVetoSignal.
+ *
+ * @param {Array} threats
+ * @param {Set<string>} [exempt] - hard exfil types the cap itself relies on
+ * @returns {boolean}
+ */
+function hasMaliceVeto(threats, exempt) {
+  const files = new Set();
+  for (const t of threats) if (t.file) files.add(t.file);
+  for (const f of files) {
+    if (hasBundleVetoSignal(threats, f)) return true;
+  }
+  for (const t of threats) {
+    if (t.severity === 'LOW') continue;
+    if (HARD_EXFIL_TYPES.has(t.type) && !(exempt && exempt.has(t.type))) return true;
+    if (F9_CREDENTIAL_FILE_RE.test(String(t.message || ''))) return true;
+  }
+  return false;
+}
+
+// F2 is built on these two types: they cannot veto it.
+const F2_INSTALLER_TYPES = new Set(['binary_dropper', 'download_exec_binary']);
+
+/**
  * Feature 2 — TRUE iff the package behaves as a native-binary installer
  * AND every URL visible in its threat messages points to GitHub releases.
  *
@@ -312,6 +348,8 @@ function installUrlGithubReleases(result) {
   if (!hasInstaller) return false;
   // Any known-suspicious destination present => not a github-only installer.
   if (threats.some(t => t.type === 'suspicious_domain')) return false;
+  // A GitHub host proves where the binary comes from, not what the rest does.
+  if (hasMaliceVeto(threats, F2_INSTALLER_TYPES)) return false;
 
   const hosts = extractHostsFromThreats(threats);
   if (hosts.size === 0) return false;
@@ -404,21 +442,38 @@ function bundleWithoutInstallScripts(result, meta) {
  * "hook body was read from a local source file", i.e. dev tooling like
  * husky / simple-git-hooks installing its own canned hook.
  */
-function gitHookSourceLocal(result) {
+function gitHookSourceLocal(result, meta) {
   const threats = (result && result.threats) || [];
   const hookThreats = threats.filter(t => t.type === 'git_hooks_injection');
   if (hookThreats.length === 0) return false;
+  // A local hook source says nothing about what the hook body does.
+  if (hasMaliceVeto(threats)) return false;
+  // The writer uses the network, or loads a module by a computed name next to an http(s)
+  // URL (set by the AST scan): the body may not come from the package.
+  if (hookThreats.some(h => h.networkInFile)) return false;
+  // Dependency typosquat findings that F5 already discounts for a scoped host package.
+  const typosquatDiscounted = typosquatScopedPackage(result, meta);
 
-  const remoteByFile = new Map();
+  const hookFiles = new Set(hookThreats.map(h => h.file).filter(Boolean));
   for (const t of threats) {
-    if (!t.file || !REMOTE_FETCH_TYPES.has(t.type)) continue;
-    remoteByFile.set(t.file, true);
-  }
-  for (const h of hookThreats) {
-    if (h.file && remoteByFile.has(h.file)) return false;
+    // A remote fetch in the file writing the hook, at any severity: not a local source.
+    if (t.file && hookFiles.has(t.file) && REMOTE_FETCH_TYPES.has(t.type)) return false;
+    if (t.severity === 'LOW' || F4_HOOK_INSTALLER_TYPES.has(t.type)) continue;
+    if (typosquatDiscounted && F5_DISCOUNTED_TYPES.has(t.type)) continue;
+    // The file writing the hook may also load the project config by path (simple-git-hooks);
+    // any other finding above LOW, in any file, lifts the cap.
+    if (t.file && hookFiles.has(t.file) && F4_CONFIG_LOAD_TYPES.has(t.type)) continue;
+    return false;
   }
   return true;
 }
+
+// The findings a local git hook installer produces by itself.
+const F4_HOOK_INSTALLER_TYPES = new Set(['git_hooks_injection', 'lifecycle_script', 'lifecycle_file_exec']);
+// Loading a config file by path, tolerated in the file writing the hook only.
+const F4_CONFIG_LOAD_TYPES = new Set(['dynamic_require', 'dynamic_import']);
+// The findings whose points F5 removes (scoring.js applyContextualFPCaps).
+const F5_DISCOUNTED_TYPES = new Set(['typosquat_detected', 'lifecycle_typosquat']);
 
 // --- v2.10.96 extended FP features (F5-F8, VPS review 2026-04-18) ---
 //
@@ -1442,7 +1497,7 @@ function extractFeatures(result, meta) {
   features.network_destination_first_party = networkDestinationFirstParty(result, meta) ? 1 : 0;
   features.install_url_github_releases = installUrlGithubReleases(result) ? 1 : 0;
   features.bundle_without_install_scripts = bundleWithoutInstallScripts(result, meta) ? 1 : 0;
-  features.git_hook_source_local = gitHookSourceLocal(result) ? 1 : 0;
+  features.git_hook_source_local = gitHookSourceLocal(result, meta) ? 1 : 0;
   features.typosquat_scoped_package = typosquatScopedPackage(result, meta) ? 1 : 0;
   features.obfuscation_without_vector = obfuscationWithoutVector(result) ? 1 : 0;
   features.placeholder_anti_dep_confusion = placeholderAntiDepConfusion(result, meta) ? 1 : 0;

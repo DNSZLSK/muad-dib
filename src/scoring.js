@@ -1901,7 +1901,7 @@ function applyContextualFPCaps(result, pkgMeta) {
     applied.push({ feature: 'install_url_github_releases', cap: 35 });
   }
   // F4: git hooks from local source → MAX 35
-  if (gitHookSourceLocal(result)) {
+  if (gitHookSourceLocal(result, meta)) {
     applied.push({ feature: 'git_hook_source_local', cap: 35 });
   }
   // F6: commercial obfuscation without attack vector → MAX 35

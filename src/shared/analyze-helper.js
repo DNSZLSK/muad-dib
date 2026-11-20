@@ -18,7 +18,7 @@
  */
 
 const path = require('path');
-const { isDevFile, findJsFiles, forEachSafeFile } = require('../utils.js');
+const { isDevFile, findJsFiles, forEachSafeFile, EXCLUDED_DIRS } = require('../utils.js');
 const { looksBinaryString } = require('./binary-sniff.js');
 const { markIncomplete } = require('./completeness.js');
 
@@ -55,6 +55,37 @@ function executedFiles(targetPath) {
   return rel;
 }
 
+// Files run by an install hook (preinstall, install, postinstall), and what they require or
+// spawn, are analyzed even in a directory the JavaScript walk excludes (dist/, build/, out/,
+// output/). Only install hooks seed this set: main/bin/exports targets in those directories
+// stay excluded (see the 2026-11-08 note above).
+const INSTALL_TIME_EXT_RE = /\.(?:js|mjs|cjs)$/i;
+const _excludedSegments = new Set(EXCLUDED_DIRS.filter(d => d !== 'node_modules'));
+
+// Not cached: the install-hook closure is a few files, and `muaddib watch` rescans the same
+// directory after a change.
+function installTimeFilesInExcludedDirs(targetPath) {
+  const abs = [];
+  try {
+    const { computeReachableFiles, getInstallHookEntryPoints } = require('../scanner/reachability.js');
+    const seeds = getInstallHookEntryPoints(targetPath);
+    if (seeds.length > 0) {
+      const { reachableFiles } = computeReachableFiles(targetPath, seeds);
+      for (const r of reachableFiles) {
+        const parts = String(r).split(/[\\/]/);
+        if (parts.includes('node_modules') || parts.includes('..')) continue;
+        if (!INSTALL_TIME_EXT_RE.test(r)) continue;
+        if (!parts.slice(0, -1).some(p => _excludedSegments.has(p))) continue;
+        abs.push(path.join(targetPath, ...parts));
+        if (abs.length >= MAX_EXECUTED_FILES) break;
+      }
+    }
+  } catch {
+    // Reachability failure: no extra file (previous behavior).
+  }
+  return abs;
+}
+
 /**
  * Processing order under a work budget (architecture lot 2): the files the package executes
  * first, closest to an entry point first (executedFiles is filled by a breadth-first walk
@@ -88,7 +119,14 @@ function budgetOrder(targetPath, files) {
  */
 function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
   const files = findJsFiles(targetPath);
-  const executed = executedFiles(targetPath);
+  const listed = new Set(files);
+  const installTime = new Set();
+  for (const f of installTimeFilesInExcludedDirs(targetPath)) {
+    installTime.add(path.relative(targetPath, f).replace(/\\/g, '/'));
+    if (!listed.has(f)) { files.push(f); listed.add(f); }
+  }
+  const executedAll = executedFiles(targetPath);
+  const executed = installTime.size === 0 ? executedAll : { has: rel => executedAll.has(rel) || installTime.has(rel) };
   const component = options.component || 'analyzeWithDeobfuscation';
   const byteBudget = Number.isFinite(options.byteBudget) && options.byteBudget >= 0 ? options.byteBudget : null;
 
