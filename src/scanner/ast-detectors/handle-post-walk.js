@@ -697,7 +697,21 @@ function handlePostWalk(ctx) {
       });
     }
   }
+
+  // A git hook written by a file that also uses the network may get its body from outside
+  // the package: mark it, so the local-source git hook cap (feature-extractor F4) skips it.
+  // A module loaded by a computed name next to an http(s) URL counts as network use too.
+  const code = src || ctx._content || '';
+  const dynamicLoadNearUrl = /https?:\/\//.test(code) &&
+    ctx.threats.some(t => (t.type === 'dynamic_require' || t.type === 'dynamic_import') && t.file === ctx.relFile);
+  if (ctx.hasNetworkCallInFile || dynamicLoadNearUrl || NETWORK_USE_RE.test(code)) {
+    for (const t of ctx.threats) {
+      if (t.type === 'git_hooks_injection' && t.file === ctx.relFile) t.networkInFile = true;
+    }
+  }
 }
 
+// fetch(), a network module loaded by require / import, XMLHttpRequest or WebSocket.
+const NETWORK_USE_RE = /\bfetch\s*\(|\b(?:require|import)\s*\(\s*['"`](?:node:)?(?:https?|http2|net|tls|dgram|undici|axios|node-fetch|got|request|ws)['"`]|\bfrom\s*['"`](?:node:)?(?:https?|http2|net|tls|dgram|undici|axios|node-fetch|got|request|ws)['"`]|\bXMLHttpRequest\b|\bWebSocket\b/;
 
 module.exports = { handlePostWalk };

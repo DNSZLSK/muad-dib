@@ -1374,6 +1374,32 @@ function runMLFeatureExtractorTests() {
       'network exfil from the same file invalidates local-source heuristic');
   });
 
+  test('git_hook_source_local: FALSE when the hook-writing file has a LOW remote fetch', () => {
+    const result = {
+      threats: [
+        { type: 'git_hooks_injection', severity: 'HIGH', file: 'bin/setup.js',
+          message: 'Git hook injection: writeFileSync() writes to .git/hooks/.' },
+        { type: 'dangerous_call_fetch', severity: 'LOW', file: 'bin/setup.js', message: 'fetch() call' }
+      ],
+      summary: { total: 2, critical: 0, high: 1, medium: 0, low: 1, riskScore: 40 }
+    };
+    assert(gitHookSourceLocal(result) === false,
+      'a remote fetch in the hook-writing file, even LOW, => not a local source');
+  });
+
+  test('git_hook_source_local: TRUE when the LOW remote fetch is in another file', () => {
+    const result = {
+      threats: [
+        { type: 'git_hooks_injection', severity: 'HIGH', file: 'bin/setup.js',
+          message: 'Git hook injection: writeFileSync() writes to .git/hooks/.' },
+        { type: 'dangerous_call_fetch', severity: 'LOW', file: 'lib/update-check.js', message: 'fetch() call' }
+      ],
+      summary: { total: 2, critical: 0, high: 1, medium: 0, low: 1, riskScore: 40 }
+    };
+    assert(gitHookSourceLocal(result) === true,
+      'a LOW finding outside the hook-writing file does not lift the cap');
+  });
+
   test('git_hook_source_local: FALSE when no git_hooks_injection threat is present', () => {
     const result = {
       threats: [

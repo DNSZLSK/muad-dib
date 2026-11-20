@@ -115,6 +115,126 @@ function resolveEntryPoint(candidate, packagePath) {
   return null;
 }
 
+function scriptJsCandidates(pkg, keys) {
+  const out = [];
+  if (!pkg || !pkg.scripts || typeof pkg.scripts !== 'object') return out;
+  for (const key of keys) {
+    if (typeof pkg.scripts[key] === 'string') out.push(...extractScriptJsFiles(pkg.scripts[key]));
+  }
+  return out;
+}
+
+function resolveCandidates(candidates, packagePath) {
+  const resolved = new Set();
+  for (const c of candidates) {
+    if (!c || typeof c !== 'string') continue;
+    const r = resolveEntryPoint(c, packagePath);
+    if (r) resolved.add(r);
+  }
+  return resolved;
+}
+
+// Hooks npm runs when the package is installed from the registry.
+const INSTALL_HOOK_KEYS = ['preinstall', 'install', 'postinstall'];
+// `npm run x` / `yarn run x` / `pnpm run x` chains followed from an install hook.
+const MAX_SCRIPT_HOPS = 8;
+const MAX_SCRIPT_CHARS = 8192;
+const RUNNERS = new Set(['npm', 'yarn', 'pnpm']);
+
+// Simple commands of a script line: split on shell separators, then on whitespace, quotes
+// dropped. Linear, no backtracking (the script text is package-controlled).
+function scriptCommands(cmd) {
+  return String(cmd).slice(0, MAX_SCRIPT_CHARS).split(/[;&|\n]+/)
+    .map(c => c.replace(/['"`]/g, ' ').split(/\s+/).filter(Boolean))
+    .filter(t => t.length > 0);
+}
+
+// First non-option argument after index i (options start with '-').
+function firstOperand(tokens, i) {
+  for (let j = i; j < tokens.length; j++) {
+    if (!tokens[j].startsWith('-')) return tokens[j];
+  }
+  return null;
+}
+
+// node options whose value is the next token. Preload options load and run that file.
+const NODE_PRELOAD_OPTS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader']);
+const NODE_VALUE_OPTS = new Set(['-e', '--eval', '-p', '--print', '-C', '--conditions', '--env-file',
+  '--input-type', '--title', '--inspect-port', '--watch-path', '--cpu-prof-dir', '--heap-prof-dir']);
+
+// Files node runs from a command: preloaded modules (-r x, --import x, --require=x) and the
+// script (first operand after the options), with or without extension.
+function nodeTargets(cmd) {
+  const out = [];
+  for (const t of scriptCommands(cmd)) {
+    const i = t.indexOf('node');
+    if (i === -1) continue;
+    for (let j = i + 1; j < t.length; j++) {
+      const tok = t[j];
+      if (!tok.startsWith('-')) { out.push(tok); break; }
+      const eq = tok.indexOf('=');
+      const opt = eq === -1 ? tok : tok.slice(0, eq);
+      if (NODE_PRELOAD_OPTS.has(opt)) {
+        const v = eq === -1 ? t[++j] : tok.slice(eq + 1);
+        if (v) out.push(v);
+      } else if (eq === -1 && NODE_VALUE_OPTS.has(opt)) {
+        j++;
+      }
+    }
+  }
+  return out;
+}
+
+// Script names invoked through `npm run x`, `npm run-script x`, `yarn x`, `pnpm run x`.
+function runScriptNames(cmd) {
+  const out = [];
+  for (const t of scriptCommands(cmd)) {
+    const i = t.findIndex(x => RUNNERS.has(x));
+    if (i === -1) continue;
+    let j = i + 1;
+    if (t[j] === 'run' || t[j] === 'run-script') j++;
+    const name = firstOperand(t, j);
+    if (name) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * JS files run by the install hooks (preinstall, install, postinstall) of package.json,
+ * resolved against the filesystem, following `npm run <script>` indirections (bounded).
+ * `node dist/x` without extension and `node ./dist` (directory index) resolve too.
+ * No fallback to index.js: no hook, no entry.
+ * @param {string} packagePath - Absolute path to package root
+ * @returns {string[]} Relative paths (forward slashes)
+ */
+function getInstallHookEntryPoints(packagePath) {
+  let pkg;
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(packagePath, 'package.json'), 'utf8'));
+  } catch {
+    return [];
+  }
+  const scripts = pkg && pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : null;
+  if (!scripts) return [];
+  const candidates = [];
+  const seen = new Set();
+  const queue = INSTALL_HOOK_KEYS.filter(k => typeof scripts[k] === 'string');
+  let hops = 0;
+  while (queue.length > 0 && hops < MAX_SCRIPT_HOPS + INSTALL_HOOK_KEYS.length) {
+    const key = queue.shift();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hops++;
+    const cmd = scripts[key];
+    if (typeof cmd !== 'string') continue;
+    candidates.push(...nodeTargets(cmd));
+    for (const name of runScriptNames(cmd)) {
+      if (Object.prototype.hasOwnProperty.call(scripts, name) && !seen.has(name)) queue.push(name);
+    }
+  }
+  return [...resolveCandidates(candidates, packagePath)];
+}
+
 /**
  * Extract entry points from package.json.
  * Sources: main, bin, exports, browser, module, lifecycle scripts.
@@ -171,21 +291,9 @@ function getEntryPoints(packagePath) {
     'prepack', 'postpack', 'prepublishOnly', 'prepublish',
     'preuninstall', 'uninstall', 'postuninstall'
   ];
-  if (pkg.scripts) {
-    for (const key of lifecycleKeys) {
-      if (typeof pkg.scripts[key] === 'string') {
-        candidates.push(...extractScriptJsFiles(pkg.scripts[key]));
-      }
-    }
-  }
+  candidates.push(...scriptJsCandidates(pkg, lifecycleKeys));
 
-  // Resolve candidates against filesystem
-  const resolved = new Set();
-  for (const c of candidates) {
-    if (!c || typeof c !== 'string') continue;
-    const r = resolveEntryPoint(c, packagePath);
-    if (r) resolved.add(r);
-  }
+  const resolved = resolveCandidates(candidates, packagePath);
 
   // Default fallback: try index.js
   if (resolved.size === 0) {
@@ -318,10 +426,11 @@ function resolvePathArg(argNode, fileDir, packagePath) {
 /**
  * BFS traversal from entry points through local imports and spawn targets.
  * @param {string} packagePath - Absolute path to package root
+ * @param {string[]} [seeds] - Start files (relative); default: getEntryPoints(packagePath)
  * @returns {{ reachableFiles: Set<string>, entryPoints: string[], skipped: boolean }}
  */
-function computeReachableFiles(packagePath) {
-  const entryPoints = getEntryPoints(packagePath);
+function computeReachableFiles(packagePath, seeds) {
+  const entryPoints = Array.isArray(seeds) ? seeds : getEntryPoints(packagePath);
 
   if (entryPoints.length === 0) {
     return { reachableFiles: new Set(), entryPoints: [], skipped: true };
@@ -967,6 +1076,7 @@ module.exports = {
   computeReachableFiles,
   computeReachableFunctions,
   getEntryPoints,
+  getInstallHookEntryPoints,
   extractExportsPaths,
   extractScriptJsFiles,
   // Exported for tests
