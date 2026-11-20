@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Tests
+
+- **End-to-end tests for caps F2, F9 and F15** (`tests/integration/e2e-fp-caps.test.js`, 6 tests, real CLI, architecture lot 4). F2 `install_url_github_releases`: applies to an install hook that downloads a binary from GitHub releases, makes it executable and runs it; not when the same installer downloads from another host (score >= 75). F9 `mcp_server_env_access`: applies to an MCP server that writes its client config with a provider key and has no install hook; not with an install hook. F15 `mcp_server_benign_lifecycle`: applies to the same package with a plain build hook; neither F9 nor F15 applies when the hook pipes a download into a shell (score >= 75). Making each predicate always false fails its positive test; removing the GitHub-host check, the F9 install-hook check or the F15 malicious-lifecycle check fails its negative test.
+
 ## [2.12.4] - 2026-11-20
 
 ### Security
