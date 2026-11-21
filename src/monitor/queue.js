@@ -1124,7 +1124,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         try {
           const canary = isCanaryEnabled();
           console.log(`[MONITOR] SANDBOX (first-publish): launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-          sandboxResult = await runSandbox(name, { canary, signal });
+          sandboxResult = await runSandbox(name, { canary, signal, version });
           console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
         } catch (err) {
           console.error(`[MONITOR] SANDBOX ERROR: ${name}@${version} — ${err.message}`);
@@ -1429,7 +1429,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
               const reason = tier === 2 ? ' (T2, queue low)' : ' (T1b, conditional)';
               console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
               markSandboxed(name); // stamp before the await: an aborted/inconclusive run still spent the time
-              sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true, signal });
+              sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true, signal, version });
             } else {
               // T1b/T2: all sandbox slots busy — defer instead of blocking worker
               console.log(`[MONITOR] SANDBOX DEFER (slots full): ${name}@${version} (tier=${tier}, score=${riskScore})`);

@@ -1,10 +1,22 @@
 #!/bin/sh
 PACKAGE="$1"
 MODE="${2:-permissive}"
+# Optional exact version to install. Without it `npm install <name>` resolves the
+# registry's `latest` tag at run time, which is not necessarily the version that was
+# scanned (a release outside the latest line, or a newer publish since the scan).
+VERSION="${3:-}"
 
 if [ -z "$PACKAGE" ]; then
-  echo "Usage: sandbox-runner.sh <package-name> [permissive|strict]" >&2
+  echo "Usage: sandbox-runner.sh <package-name> [permissive|strict] [version]" >&2
   exit 1
+fi
+INSTALL_SPEC="$PACKAGE"
+if [ -n "$VERSION" ]; then
+  # Defense in depth (the host validates too): the spec is interpolated into `sh -c`.
+  case "$VERSION" in
+    *[!0-9A-Za-z.+-]*) echo "[SANDBOX] invalid version: refusing to run" >&2; exit 1 ;;
+  esac
+  INSTALL_SPEC="$PACKAGE@$VERSION"
 fi
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -50,6 +62,9 @@ mkdir -p /home/sandboxuser/.config /home/sandboxuser/.local/share \
 chown -R sandboxuser:sandboxuser /home/sandboxuser/.config \
   /home/sandboxuser/.local /home/sandboxuser/Downloads \
   /home/sandboxuser/Documents /home/sandboxuser/.vscode
+# The home tmpfs is mounted owned by root (runc): npm could not create ~/.npm and every
+# install failed with EACCES before the package was fetched. A real home belongs to its user.
+chown sandboxuser:sandboxuser /home/sandboxuser
 
 # ══════════════════════════════════════════════════════════════
 # PHASE 0.6: Libfaketime setup (cross-process time acceleration)
@@ -257,7 +272,7 @@ echo "[SANDBOX] Honey environment deployed." >&2
 # tcpdump already captures install-phase network; preload targets runtime behavior.
 
 # ── 3. npm install with strace — as sandboxuser ──
-echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
+echo "[SANDBOX] Installing $INSTALL_SPEC as sandboxuser..." >&2
 cd /sandbox/install
 # Ensure sandboxuser owns the install directory
 chown sandboxuser:sandboxuser /sandbox/install
@@ -266,18 +281,18 @@ chown sandboxuser:sandboxuser /sandbox/install
 if [ -n "$MUADDIB_GVISOR" ]; then
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 elif [ "$MODE" = "strict" ]; then
   su sandboxuser -s /bin/sh -c "
     strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace.log \
-      npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+      npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 else
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 fi
 EXIT_CODE=$?
@@ -290,24 +305,25 @@ EXIT_CODE=$?
 export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/node_setup.js}"
 echo "[SANDBOX] Executing package entry point..." >&2
 
-if echo "$PACKAGE" | grep -q '^/'; then
-  # Local mode: $PACKAGE is already a path (e.g. /sandbox/local-pkg)
-  REQUIRE_PATH="$PACKAGE"
-else
-  # Remote mode: package installed in node_modules
-  REQUIRE_PATH="/sandbox/install/node_modules/$PACKAGE"
-fi
+# Local mode: $PACKAGE is a path (e.g. /sandbox/local-pkg), required as before.
+# Registry mode: required by NAME from /sandbox/install, so the package's "exports" map is
+# honoured (an absolute path to node_modules/<name> ignores "exports": packages that only
+# declare "exports", such as current chalk or typescript, were reported MODULE_NOT_FOUND and
+# never executed). An ESM-only package (no require condition, or top-level await) is
+# loaded with import(). The spec goes through the environment, never into the JS source.
+ENTRY_SPEC_VALUE="$PACKAGE"
+ENTRY_JS="const s=process.env.ENTRY_SPEC;delete process.env.ENTRY_SPEC;const fail=(e)=>{console.error('[ENTRY_ERROR] '+((e&&e.code)||'UNKNOWN')+': '+(e&&e.message));process.exitCode=42;};try{require(s);}catch(e){if(e&&['ERR_REQUIRE_ESM','ERR_REQUIRE_ASYNC_MODULE','ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(e.code)){import(s).catch(fail);}else{fail(e);}}"
 
 # gVisor mode: no strace wrapper — gVisor traces at kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   su sandboxuser -s /bin/sh -c "
-    timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
+    cd /sandbox/install && ENTRY_SPEC='$ENTRY_SPEC_VALUE' timeout 30 node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 else
   su sandboxuser -s /bin/sh -c "
-    strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+    cd /sandbox/install && ENTRY_SPEC='$ENTRY_SPEC_VALUE' strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace-entrypoint.log \
-      timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
+      timeout 30 node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 
   # Merge entrypoint strace into main strace log for unified analysis

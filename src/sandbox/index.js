@@ -251,6 +251,12 @@ function imageExists() {
 let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
 let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
 let _gvisorTelemetryWarned = false; // throttle the missing-gVisor-trace warning to once per process
+// A registry version string safe to pass to the runner, where it is interpolated into
+// `sh -c`: semver characters only (digits, letters, '.', '-', '+'), bounded length,
+// starting with an alphanumeric (no option-like leading '-').
+function isSafeVersion(v) {
+  return typeof v === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/.test(v);
+}
 
 // Why a sandbox run that observed no behavior (score 0) cannot be read as benign.
 // Pure: returns { reasons: string[], evidence: string } or null when the run is usable.
@@ -374,7 +380,8 @@ async function buildSandboxImage() {
 function buildDockerArgs(opts = {}) {
   const {
     strict = false, canaryTokens = null, timeOffset = 0, gvisorMode = false,
-    containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode
+    containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode,
+    version = null
   } = opts;
 
   const dockerArgs = [
@@ -446,7 +453,10 @@ function buildDockerArgs(opts = {}) {
   }
 
   dockerArgs.push('--tmpfs', '/tmp:rw,nosuid,size=64m');
-  dockerArgs.push('--tmpfs', '/sandbox/install:rw,nosuid,size=256m');
+  // exec: Docker mounts a --tmpfs noexec unless told otherwise, so a package that runs a
+  // binary it ships (esbuild, swc...) failed to install (EACCES) and was never analyzed.
+  // The container (and gVisor) is the isolation boundary, not this mount option.
+  dockerArgs.push('--tmpfs', '/sandbox/install:rw,exec,nosuid,size=256m');
   dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
   dockerArgs.push('--read-only');
 
@@ -462,6 +472,9 @@ function buildDockerArgs(opts = {}) {
   dockerArgs.push(DOCKER_IMAGE);
   dockerArgs.push(local ? '/sandbox/local-pkg' : packageName);
   dockerArgs.push(mode);
+  // Exact version to install (registry mode only): the runner installs <name>@<version>
+  // instead of resolving `latest` at run time. Validated by the caller (isSafeVersion).
+  if (!local && version) dockerArgs.push(version);
 
   return dockerArgs;
 }
@@ -483,6 +496,10 @@ async function runSingleSandbox(packageName, options = {}) {
   const localAbsPath = options.localAbsPath || null;
   const displayName = options.displayName || packageName;
   const mode = strict ? 'strict' : 'permissive';
+  const version = (!local && options.version) ? options.version : null;
+  if (version && !isSafeVersion(version)) {
+    return inconclusiveResult(`Invalid version string, sandbox not run: ${String(version).slice(0, 40)}`);
+  }
   const timeOffset = options.timeOffset || 0;
   const runTimeout = options.runTimeout || CONTAINER_TIMEOUT;
   const gvisorMode = options.gvisor || false;
@@ -547,7 +564,7 @@ async function runSingleSandbox(packageName, options = {}) {
 
     const dockerArgs = buildDockerArgs({
       strict, canaryTokens, timeOffset, gvisorMode,
-      containerName, fakeHostname, local, localAbsPath, packageName, mode
+      containerName, fakeHostname, local, localAbsPath, packageName, mode, version
     });
 
     const proc = spawn('docker', dockerArgs);
@@ -910,7 +927,7 @@ async function runSandbox(packageName, options = {}) {
     // maxRuns: cap number of time-offset runs. Default: all TIME_OFFSETS (3 runs).
     // T1b/T2 use maxRuns=1 to reduce 270s→90s — time bomb detection is a luxury under load.
     const effectiveRuns = Math.min(options.maxRuns || TIME_OFFSETS.length, TIME_OFFSETS.length);
-    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${effectiveRuns}, slots: ${slotInfo})...`);
+    console.log(`[SANDBOX] Analyzing "${displayName}${!local && options.version ? "@" + options.version : ""}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${effectiveRuns}, slots: ${slotInfo})...`);
 
     const allRuns = [];
     let bestResult = cleanResult;
@@ -929,6 +946,7 @@ async function runSandbox(packageName, options = {}) {
         local,
         localAbsPath,
         displayName,
+        version: local ? null : (options.version || null),
         timeOffset: offset,
         runTimeout: SINGLE_RUN_TIMEOUT,
         gvisor: useGvisor,
@@ -1325,4 +1343,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };

@@ -482,6 +482,23 @@ async function runDeferredSandboxTests() {
     }
   });
 
+  await asyncTest('deferred sandbox installs the scanned version, not the registry latest', async () => {
+    const { enqueueDeferred, processDeferredItem, _resetDeferredQueue, _setRunSandboxForTest } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+    const calls = [];
+    try {
+      _setRunSandboxForTest((name, opts) => { calls.push({ name, version: opts && opts.version }); return Promise.resolve({ score: 0, severity: 'CLEAN', findings: [] }); });
+      enqueueDeferred(makeItem({ name: 'ver-pkg', version: '0.30.4', tier: '1b', riskScore: 50 }));
+      await processDeferredItem({});
+      assert(calls.length === 1, `one sandbox run, got ${calls.length}`);
+      assert(calls[0].name === 'ver-pkg' && calls[0].version === '0.30.4',
+        `the deferred run must pass the queued version, got ${JSON.stringify(calls[0])}`);
+    } finally {
+      _setRunSandboxForTest(null);
+      _resetDeferredQueue();
+    }
+  });
+
   test('worker processes highest-score item first (queue ordering via shift)', () => {
     // The worker calls _deferredQueue.shift() to pick items.
     // Since the queue is sorted by riskScore DESC, shift() always picks the highest.

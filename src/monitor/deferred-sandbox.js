@@ -270,7 +270,7 @@ async function processDeferredItem(stats) {
     // single-run (maxRuns=1, ~90s vs ~270s) for fast deferred-queue drain.
     const maxRuns = item.tier === '1a' ? undefined : 1;
     markSandboxed(item.name); // stamp for sandbox-revalidation cadence (matches the synchronous path)
-    sandboxResult = await _runSandboxFn(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal });
+    sandboxResult = await _runSandboxFn(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal, version: item.version });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);

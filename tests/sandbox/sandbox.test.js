@@ -1064,6 +1064,35 @@ async function runSandboxTests() {
   // spawn) instead of re-deriving the FAKETIME string inline. They pin the exact env contract
   // the container receives: the libfaketime string, the active flag, and NODE_TIMING_OFFSET=0
   // (the anti double-acceleration invariant). buildDockerArgs is KEEP-IN-SYNC with sandbox-runner.sh.
+  test('SANDBOX-VERSION: registry mode passes the scanned version after the mode (runner installs name@version)', () => {
+    const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', version: '0.30.4', containerName: 't', fakeHostname: 'h' });
+    assert(JSON.stringify(args.slice(-3)) === JSON.stringify(['axios', 'permissive', '0.30.4']),
+      'the last three args must be name, mode, version, got ' + JSON.stringify(args.slice(-3)));
+  });
+
+  test('SANDBOX-VERSION: no version → unchanged argument tail (name, mode)', () => {
+    const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', containerName: 't', fakeHostname: 'h' });
+    assert(args[args.length - 1] === 'permissive' && args[args.length - 2] === 'axios', 'tail must stay name, mode, got ' + JSON.stringify(args.slice(-2)));
+  });
+
+  test('SANDBOX-VERSION: local mode never appends a version', () => {
+    const args = buildDockerArgs({ packageName: '/x', mode: 'permissive', version: '1.0.0', local: true, localAbsPath: '/x', containerName: 't', fakeHostname: 'h' });
+    assert(args[args.length - 1] === 'permissive', 'local mode tail must end with the mode, got ' + JSON.stringify(args.slice(-2)));
+  });
+
+  test('SANDBOX-VERSION: isSafeVersion accepts semver, refuses shell or option-like strings', () => {
+    const { isSafeVersion } = require('../../src/sandbox/index.js');
+    for (const ok of ['1.14.1', '0.30.4', '6.0.0-rc.1', '1.0.0+build.7', '2.0.0-beta.4']) assert(isSafeVersion(ok), 'should accept ' + ok);
+    for (const bad of ['', '-1.0.0', '1.0.0"; id; "', '1.0.0 && x', '$(id)', '1.0.0`x`', 'a'.repeat(65), null, 1]) assert(!isSafeVersion(bad), 'should refuse ' + JSON.stringify(bad));
+  });
+
+  await asyncTest('SANDBOX-VERSION: an unsafe version is refused before any container starts (INCONCLUSIVE)', async () => {
+    const { runSingleSandbox } = require('../../src/sandbox/index.js');
+    const r = await runSingleSandbox('axios', { version: '1.0.0"; touch /tmp/pwned; "', runTimeout: 1000 });
+    assert(r.score === -1 && r.inconclusive === true && /Invalid version/.test(r.findings[0].detail),
+      'unsafe version must yield INCONCLUSIVE without running, got ' + JSON.stringify(r).slice(0, 200));
+  });
+
   test('SANDBOX-FAKETIME: buildDockerArgs 72h → MUADDIB_FAKETIME=+3d x1000 + ACTIVE + NODE_TIMING_OFFSET=0', () => {
     const args = buildDockerArgs({ timeOffset: 259200000, containerName: 't', fakeHostname: 'h' });
     assert(args.includes('MUADDIB_FAKETIME=+3d x1000'), 'should inject the +3d x1000 libfaketime string, args=' + JSON.stringify(args));
