@@ -44,6 +44,7 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
+const { floorSignals } = require('../scoring.js');
 const { appendWorkerMem } = require('./worker-mem.js');
 const { acquireHeavySlot, releaseHeavySlot, isHeavyScan, getHeavyLaneState, heavyWaitMaxMs, HEAVY_REQUEUE_MAX } = require('./heavy-lane.js');
 const { isGovernorEnabled, classifyWeight, acquireMemoryTicket, releaseMemoryTicket, isFrozen: isGovernorFrozen, getGovernorState } = require('./memory-governor.js');
@@ -367,6 +368,33 @@ function isBundledToolingOnly(threats) {
 }
 
 /**
+ * Scan-ledger fields for calibrating the score floors against the reputation factor,
+ * the mature-package cap and the severity reductions. Read-only; every field is
+ * omitted when it does not apply, so most ledger lines are unchanged.
+ *   repFactor / preRepScore: reputation factor applied and the score before it
+ *   matureCapFrom:           score before the mature-package cap, when it applied
+ *   hc:                      at least one HIGH/CRITICAL finding (webhook gate), written
+ *                            when one of the adjustments above applied
+ *   floor:                   floorSignals() of scoring.js, when a floor signal is present
+ */
+function ledgerFloorFields(result) {
+  const out = {};
+  const s = result && result.summary;
+  if (!s) return out;
+  const rep = typeof s.reputationFactor === 'number' && s.reputationFactor !== 1 && typeof s.preReputationScore === 'number';
+  const mature = typeof s.matureCapFrom === 'number';
+  if (rep) {
+    out.repFactor = Math.round(s.reputationFactor * 1000) / 1000;
+    out.preRepScore = s.preReputationScore;
+  }
+  if (mature) out.matureCapFrom = s.matureCapFrom;
+  if (rep || mature) out.hc = (s.critical > 0 || s.high > 0);
+  const floor = floorSignals(result.threats);
+  if (floor) out.floor = floor;
+  return out;
+}
+
+/**
  * Record a JSONL training sample for every scanned package.
  * Called at each decision point in scanPackage() with the appropriate label.
  * Non-fatal: failures are logged but never crash the monitor.
@@ -407,7 +435,8 @@ function recordTrainingSample(result, params) {
       source: 'scan',
       // AUDIT-A1: stamped on `result` in scanPackage (single source of truth)
       firstPublish: !!(result && result._firstPublish),
-      staticMs: result ? result._staticMs : undefined
+      staticMs: result ? result._staticMs : undefined,
+      ...ledgerFloorFields(result)
     });
   } catch (err) {
     // Non-fatal: ML export must never crash the monitor
@@ -2419,6 +2448,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
 }
 
 module.exports = {
+  ledgerFloorFields,
   // Constants
   SCAN_CONCURRENCY,
   SCAN_TIMEOUT_MS,
