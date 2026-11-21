@@ -654,6 +654,8 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   if (globalThis.process.env.MUADDIB_MATURE_CAP !== '0') {
     const matureCap = applyMatureStableCap(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
     if (matureCap && matureCap.applied) {
+      // Score before this cap, kept for the monitor scan ledger (floor calibration).
+      result.summary.matureCapFrom = matureCap.oldScore;
       debugLog('[MATURE-CAP] ' + (packageName || targetPath) + ': ' +
         matureCap.oldScore + ' -> ' + matureCap.newScore + ' (' +
         Object.entries(matureCap.reasons).map(([k, v]) => k + '=' + v).join(', ') + ')');
@@ -682,6 +684,8 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   if (globalThis.process.env.MUADDIB_METADATA_FACTOR !== '0') {
     const repAdjust = applyReputationFactor(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
     if (repAdjust) {
+      // Score before the factor, kept for the monitor scan ledger (floor calibration).
+      result.summary.preReputationScore = repAdjust.oldScore;
       debugLog('[META-FACTOR] ' + (packageName || targetPath) + ': factor=' +
         repAdjust.factor.toFixed(2) + ' (' + repAdjust.oldScore + ' → ' + repAdjust.newScore + ')');
     }
