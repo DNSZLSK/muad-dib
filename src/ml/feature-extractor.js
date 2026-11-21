@@ -380,6 +380,30 @@ function hasLifecycleScripts(meta) {
   return false;
 }
 
+/**
+ * TRUE iff the registry publish timeline shows no version published before
+ * the scanned one. Needs `time` (version -> ISO date, from getPackageMetadata)
+ * and `registry_version`, the version named by the registry feed (set by the
+ * monitor, src/monitor/queue.js workerRegistryMeta). The package.json version
+ * is not used: the publisher sets it. FALSE when either is missing, when the
+ * version is absent from the timeline, or when its date does not parse.
+ */
+function isFirstPublishedVersion(npmMeta) {
+  if (!npmMeta || typeof npmMeta.registry_version !== 'string') return false;
+  const times = npmMeta.time;
+  if (!times || typeof times !== 'object') return false;
+  const rv = npmMeta.registry_version;
+  if (!Object.prototype.hasOwnProperty.call(times, rv)) return false;
+  const own = Date.parse(times[rv]);
+  if (Number.isNaN(own)) return false;
+  for (const [v, iso] of Object.entries(times)) {
+    if (v === rv) continue;
+    const t = Date.parse(iso);
+    if (!Number.isNaN(t) && t < own) return false;
+  }
+  return true;
+}
+
 // Threshold derived from the v2.10.9x FP review of minified bundles:
 // Cluster B FPs all ship at least one > 100KB file (typical webpack chunk
 // is 200-800KB). 100KB is low enough to catch small bundlers yet high
@@ -404,6 +428,9 @@ const BUNDLE_FILE_MIN_BYTES = 100 * 1024;
 function bundleWithoutInstallScripts(result, meta) {
   if (!meta || !meta.registryMeta || meta.registryMeta.scripts === undefined) return false;
   if (hasLifecycleScripts(meta)) return false;
+  // The cap discounts the findings of a project's own build output. The first
+  // published version of a package has no release history behind that output.
+  if (isFirstPublishedVersion(meta.npmRegistryMeta)) return false;
 
   const threats = (result && result.threats) || [];
   if (threats.length === 0) return false;
@@ -1587,6 +1614,7 @@ module.exports = {
   networkDestinationFirstParty,
   installUrlGithubReleases,
   bundleWithoutInstallScripts,
+  isFirstPublishedVersion,
   gitHookSourceLocal,
   typosquatScopedPackage,
   obfuscationWithoutVector,
