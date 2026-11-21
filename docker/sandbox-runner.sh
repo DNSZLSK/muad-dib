@@ -221,7 +221,9 @@ if [ -z "$MUADDIB_GVISOR" ]; then
   OTHER_PID=$!
   sleep 1
 else
-  echo "[SANDBOX] gVisor mode — network captured at kernel level (--log-packets)." >&2
+  # The runtime records packets only when runsc runs with --log-packets; the host reports
+  # whether any runtime trace was actually found (sandbox/index.js).
+  echo "[SANDBOX] gVisor mode - network capture delegated to the runtime (runsc --log-packets), checked on host." >&2
 fi
 
 # ══════════════════════════════════════════════════════════════
@@ -387,7 +389,7 @@ comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | g
 # gVisor mode: strace parsing happens on the host via gvisor-parser.js.
 # Create empty files so the JSON report generation below works with empty arrays.
 if [ -n "$MUADDIB_GVISOR" ]; then
-  echo "[SANDBOX] gVisor mode — strace parsed on host." >&2
+  echo "[SANDBOX] gVisor mode - syscall trace delegated to the runtime (runsc --strace), read and checked on host." >&2
   touch /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
     /tmp/connections.txt /tmp/suspicious-cmds.txt \
     /tmp/dns-queries.txt /tmp/dns-resolutions.txt \

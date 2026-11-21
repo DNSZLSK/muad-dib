@@ -380,6 +380,13 @@ async function runGvisorTests() {
       assert(r && /npm install failed \(exit 1\)/.test(r.reasons[0]), 'npm 10/11 output format must be recognized, got ' + JSON.stringify(r));
     });
 
+    test('SANDBOX: any failed npm install (non-zero exit, e.g. EACCES or a failing install script) is incomplete', () => {
+      const eacces = incompleteRunReasons({ exit_code: 243, install_output: 'npm error code EACCES\nnpm error syscall mkdir', entrypoint_output: '' });
+      assert(eacces && /npm install failed \(exit 243\)/.test(eacces.reasons[0]), 'EACCES install must be incomplete, got ' + JSON.stringify(eacces));
+      const script = incompleteRunReasons({ exit_code: 1, install_output: 'npm error command sh -c node setup.mjs\nnpm error ENOSPC: no space left on device, write', entrypoint_output: '' });
+      assert(script && /npm install failed \(exit 1\)/.test(script.reasons[0]) && /ENOSPC/.test(script.evidence), 'a failing install script must be incomplete with its evidence, got ' + JSON.stringify(script));
+    });
+
     test('SANDBOX: legacy "npm ERR! code ETARGET" is still recognized', () => {
       const r = incompleteRunReasons({ exit_code: 1, install_output: 'npm ERR! code ETARGET\nnpm ERR! notarget No matching version', entrypoint_output: '' });
       assert(r && /npm install failed/.test(r.reasons[0]), 'npm <= 9 format must still be recognized, got ' + JSON.stringify(r));

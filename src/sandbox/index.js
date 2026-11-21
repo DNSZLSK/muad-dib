@@ -295,8 +295,8 @@ function isSafeVersion(v) {
 
 // Why a sandbox run that observed no behavior (score 0) cannot be read as benign.
 // Pure: returns { reasons: string[], evidence: string } or null when the run is usable.
-//   - npm could not resolve the package (both the npm <=9 "npm ERR!" and the npm >=10
-//     "npm error" output formats);
+//   - npm install failed (non-zero exit: package not found, EACCES, a failing install
+//     script...): what was meant to run did not, or did not run to the end;
 //   - the entry point could not be loaded (runner prints [ENTRY_ERROR]);
 //   - the gVisor runtime produced no trace log (telemetryMissing): the process, file and
 //     network sections are empty because nothing was recorded.
@@ -304,12 +304,10 @@ function incompleteRunReasons(report, ctx = {}) {
   if (!report) return null;
   const reasons = [];
   let evidence = '';
-  const installNotFound = report.exit_code !== 0 && report.exit_code !== undefined &&
-    typeof report.install_output === 'string' &&
-    /npm (?:ERR!|error) (?:code (?:E404|ETARGET|ERESOLVE)|404)/.test(report.install_output);
-  if (installNotFound) {
+  if (typeof report.exit_code === 'number' && report.exit_code !== 0) {
     reasons.push(`npm install failed (exit ${report.exit_code})`);
-    evidence = report.install_output.substring(0, 300);
+    // npm prints its errors last.
+    evidence = String(report.install_output || '').slice(-300);
   }
   if (typeof report.entrypoint_output === 'string' && /\[ENTRY_ERROR\]/.test(report.entrypoint_output)) {
     reasons.push('Entry point require() failed');
@@ -758,7 +756,7 @@ async function runSingleSandbox(packageName, options = {}) {
           gvisorTelemetryMissing = true;
           if (!_gvisorTelemetryWarned) {
             _gvisorTelemetryWarned = true;
-            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} — process, file and network telemetry unavailable; runsc needs --strace --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
+            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} - process, file and network telemetry unavailable; runsc needs --strace --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
           }
         } else {
           console.log(`[SANDBOX] gVisor trace logs: ${gvisorData.logFiles} file(s) parsed`);
