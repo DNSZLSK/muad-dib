@@ -163,6 +163,7 @@ const { runWorkerMemTests } = require('./unit/worker-mem.test');
 const { runPypiCatchupTests } = require('./integration/pypi-catchup.test');
 const { runHeavyLaneTests } = require('./unit/heavy-lane.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
+const { runSandboxRunnerE2ETests } = require('./integration/sandbox-runner-e2e.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
 const { runCliTests } = require('./integration/cli.test');
@@ -293,6 +294,7 @@ async function timed(name, fn) {
   await timed('preload', runPreloadTests);
   await timed('string-ioc-corroboration', runStringIocCorroborationTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
+  await timed('sandbox-runner-e2e', runSandboxRunnerE2ETests);
   await timed('entropy', runEntropyTests);
 
   // Monitor + diff
