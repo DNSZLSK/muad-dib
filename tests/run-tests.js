@@ -127,6 +127,7 @@ const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runIncompletenessTests } = require('./unit/incompleteness.test');
 const { runScannerBudgetTests } = require('./unit/scanner-budget.test');
 const { runDataDirTests } = require('./unit/data-dir.test');
+const { runRefreshSandboxImageTests } = require('./unit/refresh-sandbox-image.test');
 const { runRunscLogCleanupTests } = require('./unit/runsc-log-cleanup.test');
 const { runIocDbTests } = require('./unit/ioc-db.test');
 const { runCheckOverridesTests } = require('./unit/check-overrides.test');
@@ -415,6 +416,7 @@ async function timed(name, fn) {
   await timed('incompleteness', runIncompletenessTests);
   await timed('scanner-budget', runScannerBudgetTests);
   await timed('data-dir', runDataDirTests);
+  await timed('refresh-sandbox-image', runRefreshSandboxImageTests);
   await timed('runsc-log-cleanup', runRunscLogCleanupTests);
   await timed('ioc-db', runIocDbTests);
   await timed('check-overrides', runCheckOverridesTests);

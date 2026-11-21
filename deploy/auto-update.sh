@@ -45,6 +45,12 @@ git merge --ff-only "origin/$BRANCH" >> "$LOG_FILE" 2>&1
 # WASM) so no dep needs a build step; re-verify on the VPS if the dependency set changes.
 npm ci --production --ignore-scripts >> "$LOG_FILE" 2>&1
 
+# Sandbox image: rebuilt when docker/ changed since the image was built (it was never
+# rebuilt on update before, so runner/preload fixes never reached the running sandbox).
+# A failed build keeps the current image and does not block the code update.
+bash "$INSTALL_DIR/deploy/refresh-sandbox-image.sh" "$INSTALL_DIR" "$LOG_FILE" \
+  || log "WARNING: sandbox image refresh failed (current image kept)"
+
 # Fix ownership: git pull + npm ci run as root, monitor runs as muaddib
 chown -R muaddib:muaddib "$INSTALL_DIR" >> "$LOG_FILE" 2>&1
 
