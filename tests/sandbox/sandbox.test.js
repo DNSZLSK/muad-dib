@@ -1064,6 +1064,22 @@ async function runSandboxTests() {
   // spawn) instead of re-deriving the FAKETIME string inline. They pin the exact env contract
   // the container receives: the libfaketime string, the active flag, and NODE_TIMING_OFFSET=0
   // (the anti double-acceleration invariant). buildDockerArgs is KEEP-IN-SYNC with sandbox-runner.sh.
+  test('SANDBOX-DNS: with an upstream, the container resolver is the mock (--dns 127.0.0.1) and the upstream goes by env', () => {
+    const args = buildDockerArgs({ packageName: 'x', mode: 'permissive', upstreamDns: '213.186.33.99', containerName: 't', fakeHostname: 'h' });
+    const i = args.indexOf('--dns');
+    assert(i > 0 && args[i + 1] === '127.0.0.1', '--dns 127.0.0.1 expected (the read-only rootfs forbids rewriting resolv.conf), args=' + JSON.stringify(args));
+    assert(args.includes('MUADDIB_UPSTREAM_DNS=213.186.33.99'), 'the upstream must be passed to the runner');
+    assert(args.indexOf('--dns') < args.indexOf('muaddib-sandbox'), '--dns must be a docker option, before the image');
+  });
+
+  test('SANDBOX-DNS: pickUpstreamNameserver skips loopback and the systemd-resolved stub', () => {
+    const { pickUpstreamNameserver } = require('../../src/sandbox/index.js');
+    assert(pickUpstreamNameserver('nameserver 127.0.0.53\noptions edns0') === null, 'stub only -> null (caller then reads the systemd upstream list)');
+    assert(pickUpstreamNameserver('# x\nnameserver 127.0.0.53\nnameserver 213.186.33.99\n') === '213.186.33.99', 'first non-loopback wins');
+    assert(pickUpstreamNameserver('nameserver ::1\nnameserver 2001:4860:4860::8888') === '2001:4860:4860::8888', 'IPv6 accepted, ::1 skipped');
+    assert(pickUpstreamNameserver('nameserver 1.1.1.1; id') === null, 'a line that is not a bare address is ignored');
+  });
+
   test('SANDBOX-VERSION: registry mode passes the scanned version after the mode (runner installs name@version)', () => {
     const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', version: '0.30.4', containerName: 't', fakeHostname: 'h' });
     assert(JSON.stringify(args.slice(-3)) === JSON.stringify(['axios', 'permissive', '0.30.4']),

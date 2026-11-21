@@ -251,6 +251,41 @@ function imageExists() {
 let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
 let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
 let _gvisorTelemetryWarned = false; // throttle the missing-gVisor-trace warning to once per process
+let _mockDnsWarned = false;         // throttle the mock-network-not-in-DNS-path warning to once per process
+
+// First usable nameserver of a resolv.conf text: loopback addresses (127.0.0.0/8, ::1, the
+// systemd-resolved stub 127.0.0.53) are unreachable from inside a container. Pure.
+function pickUpstreamNameserver(text) {
+  if (typeof text !== 'string') return null;
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length !== 2 || parts[0] !== 'nameserver') continue;
+    const ip = parts[1];
+    if (ip.startsWith('127.') || ip === '::1') continue;
+    const v4 = ip.split('.');
+    if (v4.length === 4 && v4.every(o => /^\d{1,3}$/.test(o))) return ip;
+    if (ip.includes(':') && /^[0-9A-Fa-f:]+$/.test(ip)) return ip;
+  }
+  return null;
+}
+
+function readTextOrNull(read) {
+  try { return read(); } catch { return null; }
+}
+
+// Upstream resolver for the sandbox mock DNS, read once per process: MUADDIB_SANDBOX_UPSTREAM_DNS,
+// else the host resolv.conf, else the systemd-resolved upstream list, else a public resolver.
+let _upstreamDnsCache;
+function resolveSandboxUpstreamDns() {
+  if (_upstreamDnsCache !== undefined) return _upstreamDnsCache;
+  const fromEnv = pickUpstreamNameserver(`nameserver ${process.env.MUADDIB_SANDBOX_UPSTREAM_DNS || ''}`);
+  const found = fromEnv
+    || pickUpstreamNameserver(readTextOrNull(() => fs.readFileSync('/etc/resolv.conf', 'utf8')))
+    || pickUpstreamNameserver(readTextOrNull(() => fs.readFileSync('/run/systemd/resolve/resolv.conf', 'utf8')));
+  _upstreamDnsCache = found || '8.8.8.8';
+  return _upstreamDnsCache;
+}
+
 // A registry version string safe to pass to the runner, where it is interpolated into
 // `sh -c`: semver characters only (digits, letters, '.', '-', '+'), bounded length,
 // starting with an alphanumeric (no option-like leading '-').
@@ -381,7 +416,7 @@ function buildDockerArgs(opts = {}) {
   const {
     strict = false, canaryTokens = null, timeOffset = 0, gvisorMode = false,
     containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode,
-    version = null
+    version = null, upstreamDns = null
   } = opts;
 
   const dockerArgs = [
@@ -395,6 +430,15 @@ function buildDockerArgs(opts = {}) {
     '--pids-limit=100',
     '--cap-drop=ALL'
   ];
+
+  // Mock network in the DNS path: the root filesystem is read-only, so the runner cannot
+  // rewrite /etc/resolv.conf itself (that write failed silently and every query went to the
+  // real resolver). Docker writes the container's resolv.conf at creation time instead; the
+  // mock DNS forwards safe domains to upstreamDns (passed by env, unset by the runner).
+  if (upstreamDns) {
+    dockerArgs.push('--dns', '127.0.0.1');
+    dockerArgs.push('-e', `MUADDIB_UPSTREAM_DNS=${upstreamDns}`);
+  }
 
   // gVisor runtime: use runsc instead of default runc.
   // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
@@ -564,7 +608,8 @@ async function runSingleSandbox(packageName, options = {}) {
 
     const dockerArgs = buildDockerArgs({
       strict, canaryTokens, timeOffset, gvisorMode,
-      containerName, fakeHostname, local, localAbsPath, packageName, mode, version
+      containerName, fakeHostname, local, localAbsPath, packageName, mode, version,
+      upstreamDns: resolveSandboxUpstreamDns()
     });
 
     const proc = spawn('docker', dockerArgs);
@@ -688,6 +733,13 @@ async function runSingleSandbox(packageName, options = {}) {
         }
         resolve(cleanResult);
         return;
+      }
+
+      // The runner reports whether the mock network was really in the DNS path. When it was
+      // not, non-safe domains reached the real resolver and the honeypot saw nothing.
+      if (report.mock_network && report.mock_network.dns_in_path === false && !_mockDnsWarned) {
+        _mockDnsWarned = true;
+        console.warn(`[SANDBOX] WARNING: mock network not in the DNS path (started=${report.mock_network.started}) - DNS went to the real resolver; image or host older than the --dns wiring?`);
       }
 
       let gvisorTelemetryMissing = false;
@@ -1343,4 +1395,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, pickUpstreamNameserver, resolveSandboxUpstreamDns, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };

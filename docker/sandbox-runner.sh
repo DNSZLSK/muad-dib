@@ -115,7 +115,12 @@ fi
 # Safe domains (npm, GitHub, CDNs) are forwarded to the real upstream DNS.
 # Non-safe domains resolve to 127.0.0.2 where HTTP/HTTPS honeypots capture requests.
 # This allows the sandbox to observe network INTENT without real outbound traffic.
-UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')
+# The host passes --dns 127.0.0.1 (the root filesystem is read-only, so this script cannot
+# rewrite /etc/resolv.conf) and the real upstream in MUADDIB_UPSTREAM_DNS. Without it (older
+# host), fall back to the first non-loopback nameserver of resolv.conf.
+UPSTREAM_DNS="${MUADDIB_UPSTREAM_DNS:-}"
+unset MUADDIB_UPSTREAM_DNS
+[ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | grep -v '^127\.' | head -1)
 [ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS="8.8.8.8"
 
 # ── Temporarily disable libfaketime for mock network infrastructure ──
@@ -161,11 +166,25 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
   [ -f /tmp/mock-network-ready ] && break
   sleep 0.5
 done
+MOCK_STARTED=false
+MOCK_DNS_IN_PATH=false
 if [ -f /tmp/mock-network-ready ]; then
-  echo "nameserver 127.0.0.1" > /etc/resolv.conf
-  echo "[SANDBOX] Mock network active — DNS redirected to 127.0.0.1." >&2
+  MOCK_STARTED=true
+  # Already in place when the host passed --dns 127.0.0.1; otherwise try (fails on a
+  # read-only root filesystem) and report what the resolver really is.
+  grep -q '^nameserver 127\.0\.0\.1' /etc/resolv.conf 2>/dev/null || echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null
+  if [ "$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')" = "127.0.0.1" ]; then
+    MOCK_DNS_IN_PATH=true
+    echo "[SANDBOX] Mock network active - DNS goes through the mock (127.0.0.1)." >&2
+  else
+    echo "[SANDBOX] Mock network started but NOT in the DNS path (resolv.conf not writable, no --dns from host): queries go to the real resolver." >&2
+  fi
 else
-  echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  if [ "$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')" = "127.0.0.1" ]; then
+    echo "[SANDBOX] Mock network failed to start - the resolver points to it: no DNS in this run." >&2
+  else
+    echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  fi
   # Log why it failed (cert files missing? node crash?)
   [ ! -f /tmp/mock-ca.pem ] && echo "[SANDBOX] DIAG: mock-ca.pem missing (openssl failed)" >&2
   [ ! -f /tmp/mock-server-key.pem ] && echo "[SANDBOX] DIAG: mock-server-key.pem missing" >&2
@@ -492,6 +511,10 @@ if [ -f /tmp/mock-dns.log ]; then
   echo "[SANDBOX] Parsing mock DNS log..." >&2
   jq -r 'select(.safe == false) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u >> /tmp/dns-queries.txt
   jq -r 'select(.safe == false and .mock_ip != null) | "\(.domain)\t\(.mock_ip)"' /tmp/mock-dns.log 2>/dev/null >> /tmp/dns-resolutions.txt
+  # Safe domains (registry, code hosting) are forwarded to the real resolver and were
+  # dropped from the report: a download from a code-hosting release or a call to its
+  # API left no trace. Kept in a separate field (not scored) so they stay visible.
+  jq -r 'select(.safe == true) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u > /tmp/safe-dns-queries.txt
 fi
 if [ -f /tmp/mock-http.log ]; then
   echo "[SANDBOX] Parsing mock HTTP log..." >&2
@@ -513,7 +536,7 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
   /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
   /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
-  /tmp/preload.log
+  /tmp/preload.log /tmp/safe-dns-queries.txt
 
 # ── Pre-bake all data as JSON files ──
 # Previous approach passed all data via --arg/--argjson on the jq CLI.
@@ -530,6 +553,7 @@ jq_to_file() {
 # Simple line arrays
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-created.txt /tmp/rpt-fs-created.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-deleted.txt /tmp/rpt-fs-deleted.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/safe-dns-queries.txt /tmp/rpt-safe-dns.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/dns-queries.txt /tmp/rpt-dns.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-read.txt /tmp/rpt-sens-read.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-written.txt /tmp/rpt-sens-written.json
@@ -577,9 +601,12 @@ REPORT_JSON=$(jq -n \
   --arg mode "$MODE" \
   --argjson duration "${DURATION_MS:-0}" \
   --argjson exit_code "${EXIT_CODE:-1}" \
+  --argjson mock_started "${MOCK_STARTED:-false}" \
+  --argjson mock_dns "${MOCK_DNS_IN_PATH:-false}" \
   --slurpfile fs_created /tmp/rpt-fs-created.json \
   --slurpfile fs_deleted /tmp/rpt-fs-deleted.json \
   --slurpfile dns /tmp/rpt-dns.json \
+  --slurpfile safe_dns /tmp/rpt-safe-dns.json \
   --slurpfile connections /tmp/rpt-conns.json \
   --slurpfile processes /tmp/rpt-procs.json \
   --slurpfile sensitive_read /tmp/rpt-sens-read.json \
@@ -604,6 +631,7 @@ REPORT_JSON=$(jq -n \
     },
     network: {
       dns_queries: $dns[0],
+      safe_dns_queries: $safe_dns[0],
       dns_resolutions: $dns_resolutions[0],
       http_connections: $connections[0],
       http_requests: $http_requests[0],
@@ -621,7 +649,8 @@ REPORT_JSON=$(jq -n \
     install_output: $install_output[0],
     entrypoint_output: $entrypoint_output[0],
     preload_log: $preload_log[0],
-    exit_code: $exit_code
+    exit_code: $exit_code,
+    mock_network: { started: $mock_started, dns_in_path: $mock_dns }
   }' 2>/tmp/jq-final-error.log)
 
 echo "---MUADDIB-REPORT-START---"
@@ -635,6 +664,6 @@ else
     [ ! -s "$_f" ] && echo "[SANDBOX] DIAG: $_f empty/missing" >&2
   done
   # Fallback minimal JSON so the host parser doesn't crash
-  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s}\n' \
-    "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}"
+  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"safe_dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s,"mock_network":{"started":%s,"dns_in_path":%s}}\n' \
+    "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}" "${MOCK_STARTED:-false}" "${MOCK_DNS_IN_PATH:-false}"
 fi
