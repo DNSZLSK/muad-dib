@@ -35,7 +35,7 @@ const {
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { analyzePreloadLog } = require('./analyzer.js');
 const { classifyDomain } = require('./network-allowlist.js');
-const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
+const { parseGvisorLogs, cleanupGvisorLogs, gvisorLogDir: resolveGvisorLogDir } = require('./gvisor-parser.js');
 
 // ── Event-loop stall attribution for the sandbox's SYNCHRONOUS docker CLI calls ──
 // (2026-07-03) These execFileSync/execSync 'docker' calls run on the MAIN thread.
@@ -441,8 +441,11 @@ function buildDockerArgs(opts = {}) {
   }
 
   // gVisor runtime: use runsc instead of default runc.
-  // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
-  //   "runsc": { "path": "/usr/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory"] }
+  // daemon.json must keep the trace flags next to the performance ones, otherwise the
+  // runtime writes no trace and the report has no process / file / network data:
+  //   "runsc": { "path": "/usr/local/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory",
+  //     "--strace", "--debug-log=/var/log/runsc/%ID%/", "--log-packets"] }
+  // (see scripts/install-gvisor.sh; the host reports runs without any trace as INCONCLUSIVE).
   // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
   // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
   // These flags require gVisor >= 2023-06-01.
@@ -747,7 +750,7 @@ async function runSingleSandbox(packageName, options = {}) {
       // sandbox-runner.sh skips strace/tcpdump in gVisor mode, so file access,
       // connections, and process data come from gVisor's kernel-level tracing.
       if (gvisorMode && gvisorContainerId) {
-        const gvisorLogDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+        const gvisorLogDir = resolveGvisorLogDir();
         const gvisorData = syncStep('sandbox:gvisor-parse', { container: gvisorContainerId }, () => parseGvisorLogs(gvisorContainerId, gvisorLogDir));
         if (!gvisorData.logFiles) {
           // No runsc trace at all: the process / file / network sections below stay empty

@@ -127,6 +127,7 @@ const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runIncompletenessTests } = require('./unit/incompleteness.test');
 const { runScannerBudgetTests } = require('./unit/scanner-budget.test');
 const { runDataDirTests } = require('./unit/data-dir.test');
+const { runRunscLogCleanupTests } = require('./unit/runsc-log-cleanup.test');
 const { runIocDbTests } = require('./unit/ioc-db.test');
 const { runCheckOverridesTests } = require('./unit/check-overrides.test');
 const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
@@ -414,6 +415,7 @@ async function timed(name, fn) {
   await timed('incompleteness', runIncompletenessTests);
   await timed('scanner-budget', runScannerBudgetTests);
   await timed('data-dir', runDataDirTests);
+  await timed('runsc-log-cleanup', runRunscLogCleanupTests);
   await timed('ioc-db', runIocDbTests);
   await timed('check-overrides', runCheckOverridesTests);
   await timed('dilution-thresholds', runDilutionThresholdTests);

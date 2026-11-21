@@ -1080,6 +1080,19 @@ async function runSandboxTests() {
     assert(pickUpstreamNameserver('nameserver 1.1.1.1; id') === null, 'a line that is not a bare address is ignored');
   });
 
+  test('SANDBOX-GVISOR-LOGS: trace directory defaults outside /tmp (the monitor runs with PrivateTmp) and follows MUADDIB_GVISOR_LOG_DIR', () => {
+    const g = require('../../src/sandbox/gvisor-parser.js');
+    const saved = process.env.MUADDIB_GVISOR_LOG_DIR;
+    try {
+      delete process.env.MUADDIB_GVISOR_LOG_DIR;
+      assert(g.gvisorLogDir() === '/var/log/runsc', 'default must be /var/log/runsc, got ' + g.gvisorLogDir());
+      process.env.MUADDIB_GVISOR_LOG_DIR = '/srv/x';
+      assert(g.gvisorLogDir() === '/srv/x', 'env override must apply');
+    } finally {
+      if (saved === undefined) delete process.env.MUADDIB_GVISOR_LOG_DIR; else process.env.MUADDIB_GVISOR_LOG_DIR = saved;
+    }
+  });
+
   test('SANDBOX-VERSION: registry mode passes the scanned version after the mode (runner installs name@version)', () => {
     const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', version: '0.30.4', containerName: 't', fakeHostname: 'h' });
     assert(JSON.stringify(args.slice(-3)) === JSON.stringify(['axios', 'permissive', '0.30.4']),

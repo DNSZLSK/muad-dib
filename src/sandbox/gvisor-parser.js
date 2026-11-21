@@ -22,6 +22,15 @@
 const fs = require('fs');
 const path = require('path');
 
+// Where runsc writes its trace logs (--debug-log=<dir>/%ID%/) and where the host reads them.
+// Not under /tmp: the monitor runs with PrivateTmp=true, so a host /tmp/runsc written by the
+// Docker daemon is invisible to it. MUADDIB_GVISOR_LOG_DIR overrides; install-gvisor.sh and
+// daemon.json must use the same directory.
+const DEFAULT_GVISOR_LOG_DIR = '/var/log/runsc';
+function gvisorLogDir() {
+  return process.env.MUADDIB_GVISOR_LOG_DIR || DEFAULT_GVISOR_LOG_DIR;
+}
+
 // ══════════════════════════════════════════════════════════════
 // gVisor strace log parser
 //
@@ -205,11 +214,11 @@ function parseGvisorStrace(content) {
  *   3. Files in logDir containing the container ID
  *
  * @param {string} containerId - Docker container ID (full 64-char or truncated)
- * @param {string} logDir - gVisor debug-log base directory (default: /tmp/runsc)
+ * @param {string} logDir - gVisor debug-log base directory (default: DEFAULT_GVISOR_LOG_DIR)
  * @returns {string[]} Matching log file paths
  */
 function findGvisorLogs(containerId, logDir) {
-  logDir = logDir || '/tmp/runsc';
+  logDir = logDir || DEFAULT_GVISOR_LOG_DIR;
   const logFiles = [];
 
   if (!fs.existsSync(logDir)) return logFiles;
@@ -335,7 +344,7 @@ function parseGvisorLogs(containerId, logDir) {
  * @param {string} logDir - gVisor debug-log base directory
  */
 function cleanupGvisorLogs(containerId, logDir) {
-  logDir = logDir || '/tmp/runsc';
+  logDir = logDir || DEFAULT_GVISOR_LOG_DIR;
   const shortId = containerId.substring(0, 12);
 
   try {
@@ -364,6 +373,8 @@ module.exports = {
   parseGvisorStrace,
   findGvisorLogs,
   cleanupGvisorLogs,
+  gvisorLogDir,
+  DEFAULT_GVISOR_LOG_DIR,
   // Exported for unit tests
   parseStraceLine,
   extractOpenatPath,

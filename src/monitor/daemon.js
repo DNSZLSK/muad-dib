@@ -399,14 +399,14 @@ function cleanupOrphanContainers() {
 }
 
 /**
- * Clean up orphan gVisor runtime directories in /tmp/runsc.
+ * Clean up orphan gVisor trace directories in the runsc log directory (gvisorLogDir()).
  * runsc creates per-container state dirs that are NOT cleaned up when gVisor or
  * Docker crashes. In production this reached 61GB and filled the disk (ENOSPC),
  * cascading into 0-byte .tmp files and total persistence failure.
  * Removes directories older than maxAgeMs (default: 1h).
  */
 function cleanupRunscOrphans(maxAgeMs = 3600_000) {
-  const runscDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+  const runscDir = require('../sandbox/gvisor-parser.js').gvisorLogDir();
   // Instrumented (2026-07-09): readdir + per-entry statSync + recursive rmSync over
   // /tmp/runsc is a synchronous main-thread op that blocks the poll loop (RSS breaker,
   // governor feed) for as long as it runs — the prime suspect for the op:null
@@ -778,7 +778,7 @@ const MEM_TREND_MAX_BYTES = 5 * 1024 * 1024; // bounded: truncate-rotate past 5M
 
 function countRunscDirs() {
   try {
-    const dir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+    const dir = require('../sandbox/gvisor-parser.js').gvisorLogDir();
     return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
   } catch { return 0; }
 }
