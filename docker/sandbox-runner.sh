@@ -314,16 +314,21 @@ echo "[SANDBOX] Executing package entry point..." >&2
 ENTRY_SPEC_VALUE="$PACKAGE"
 ENTRY_JS="const s=process.env.ENTRY_SPEC;delete process.env.ENTRY_SPEC;const fail=(e)=>{console.error('[ENTRY_ERROR] '+((e&&e.code)||'UNKNOWN')+': '+(e&&e.message));process.exitCode=42;};try{require(s);}catch(e){if(e&&['ERR_REQUIRE_ESM','ERR_REQUIRE_ASYNC_MODULE','ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(e.code)){import(s).catch(fail);}else{fail(e);}}"
 
+# libfaketime (runs 2/3) also accelerates `timeout`: its 30 s expired in about 30 ms and
+# node was killed before loading the package, so those runs reported CLEAN without having
+# executed anything. timeout (and strace) run without the preload; only node gets it back.
+ENTRY_LD_PRELOAD="${LD_PRELOAD:-}"
+
 # gVisor mode: no strace wrapper — gVisor traces at kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   su sandboxuser -s /bin/sh -c "
-    cd /sandbox/install && ENTRY_SPEC='$ENTRY_SPEC_VALUE' timeout 30 node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
+    cd /sandbox/install && LD_PRELOAD= ENTRY_SPEC='$ENTRY_SPEC_VALUE' timeout 30 env LD_PRELOAD='$ENTRY_LD_PRELOAD' node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 else
   su sandboxuser -s /bin/sh -c "
-    cd /sandbox/install && ENTRY_SPEC='$ENTRY_SPEC_VALUE' strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+    cd /sandbox/install && LD_PRELOAD= ENTRY_SPEC='$ENTRY_SPEC_VALUE' strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace-entrypoint.log \
-      timeout 30 node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
+      timeout 30 env LD_PRELOAD='$ENTRY_LD_PRELOAD' node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 
   # Merge entrypoint strace into main strace log for unified analysis
