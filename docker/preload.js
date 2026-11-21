@@ -138,7 +138,13 @@
   // 3. LOGGER (uses saved originals, silent on error)
   // ═══════════════════════════════════════════════════════
 
+  // Re-entrancy guard: appendFileSync is implemented on top of fs.writeFileSync, which the
+  // FS_WRITE patch below wraps with log(). Without the guard, one logged write recursed
+  // until the stack overflowed, writing thousands of lines to the log per write.
+  let _inLog = false;
   function log(category, msg) {
+    if (_inLog) return;
+    _inLog = true;
     try {
       const ts = _DateNow.call(Date) - realStart;
       // Sanitize msg to prevent log injection (attacker injecting \n[PRELOAD] EXEC: DANGEROUS)
@@ -147,6 +153,8 @@
       _appendFileSync.call(_fs, LOG_FILE, `[PRELOAD] ${safeCat}: ${safeMsg} (t+${ts}ms)\n`);
     } catch (e) {
       // Silent — never break the target
+    } finally {
+      _inLog = false;
     }
   }
 

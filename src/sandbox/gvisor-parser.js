@@ -285,10 +285,14 @@ function parseGvisorLog(logPath) {
  * @returns {object} Aggregated report supplement
  */
 function parseGvisorLogs(containerId, logDir) {
+  // logFiles: how many runsc trace logs were found for this container. 0 means the
+  // runtime produced no trace at all (runsc started without --strace/--debug-log), so
+  // the empty sections below are an ABSENCE of telemetry, not an observation of nothing.
   const emptyResult = {
     sensitive_files: { read: [], written: [] },
     network: { http_connections: [] },
-    processes: { spawned: [] }
+    processes: { spawned: [] },
+    logFiles: 0
   };
 
   const logFiles = findGvisorLogs(containerId, logDir);
@@ -318,7 +322,8 @@ function parseGvisorLogs(containerId, logDir) {
   return {
     sensitive_files: { read: [...allReads], written: [...allWrites] },
     network: { http_connections: [...allConnections.values()] },
-    processes: { spawned: [...allProcesses.values()] }
+    processes: { spawned: [...allProcesses.values()] },
+    logFiles: logFiles.length
   };
 }
 

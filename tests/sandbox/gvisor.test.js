@@ -342,7 +342,54 @@ async function runGvisorTests() {
     assert(result.sensitive_files.read.length === 0, 'No reads');
     assert(result.network.http_connections.length === 0, 'No connections');
     assert(result.processes.spawned.length === 0, 'No processes');
+    assert(result.logFiles === 0, 'logFiles must be 0 when no trace log exists (absence of telemetry, not an empty observation), got ' + result.logFiles);
   });
+
+  test('GVISOR: parseGvisorLogs reports how many trace logs it read', () => {
+    const tmpDir = path.join(__dirname, '..', 'samples', 'gvisor', 'tmp-count');
+    const containerDir = path.join(tmpDir, 'count-test');
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(path.join(containerDir, 'boot.log'), '[   1] node E openat(AT_FDCWD, "/tmp/x", O_RDONLY) = 3 (0.1ms)\n');
+    fs.writeFileSync(path.join(containerDir, 'gofer.log'), '');
+    try {
+      const result = parseGvisorLogs('count-test', tmpDir);
+      assert(result.logFiles === 2, 'logFiles should count the 2 trace logs, got ' + result.logFiles);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── incompleteRunReasons: a score-0 run that observed nothing is not a CLEAN verdict ──
+  {
+    const { incompleteRunReasons } = require('../../src/sandbox/index.js');
+    const okReport = { exit_code: 0, install_output: 'added 1 package in 3s', entrypoint_output: '' };
+
+    test('SANDBOX: a run with no gVisor trace log is incomplete even when install and entry point succeeded', () => {
+      const r = incompleteRunReasons(okReport, { telemetryMissing: true });
+      assert(r && r.reasons.length === 1 && /no gVisor trace log/.test(r.reasons[0]),
+        'telemetryMissing must make the run incomplete, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: a usable run (install ok, entry point ok, telemetry present) is not incomplete', () => {
+      assert(incompleteRunReasons(okReport, { telemetryMissing: false }) === null, 'a usable run must return null');
+      assert(incompleteRunReasons(okReport) === null, 'no context = telemetry not known missing = null');
+    });
+
+    test('SANDBOX: npm >= 10 "npm error code E404" is recognized as an install failure', () => {
+      const r = incompleteRunReasons({ exit_code: 1, install_output: 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/nope', entrypoint_output: '' });
+      assert(r && /npm install failed \(exit 1\)/.test(r.reasons[0]), 'npm 10/11 output format must be recognized, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: legacy "npm ERR! code ETARGET" is still recognized', () => {
+      const r = incompleteRunReasons({ exit_code: 1, install_output: 'npm ERR! code ETARGET\nnpm ERR! notarget No matching version', entrypoint_output: '' });
+      assert(r && /npm install failed/.test(r.reasons[0]), 'npm <= 9 format must still be recognized, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: entry point failure is reported with its evidence', () => {
+      const r = incompleteRunReasons({ exit_code: 0, install_output: 'added 1 package', entrypoint_output: "[ENTRY_ERROR] MODULE_NOT_FOUND: Cannot find module 'x'" });
+      assert(r && r.reasons[0] === 'Entry point require() failed' && /MODULE_NOT_FOUND/.test(r.evidence), 'entry error must be reported, got ' + JSON.stringify(r));
+    });
+  }
 
   // ── Docker args verification (env var detection) ──
 

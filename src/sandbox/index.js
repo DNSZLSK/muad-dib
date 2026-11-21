@@ -250,6 +250,36 @@ function imageExists() {
 
 let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
 let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
+let _gvisorTelemetryWarned = false; // throttle the missing-gVisor-trace warning to once per process
+
+// Why a sandbox run that observed no behavior (score 0) cannot be read as benign.
+// Pure: returns { reasons: string[], evidence: string } or null when the run is usable.
+//   - npm could not resolve the package (both the npm <=9 "npm ERR!" and the npm >=10
+//     "npm error" output formats);
+//   - the entry point could not be loaded (runner prints [ENTRY_ERROR]);
+//   - the gVisor runtime produced no trace log (telemetryMissing): the process, file and
+//     network sections are empty because nothing was recorded.
+function incompleteRunReasons(report, ctx = {}) {
+  if (!report) return null;
+  const reasons = [];
+  let evidence = '';
+  const installNotFound = report.exit_code !== 0 && report.exit_code !== undefined &&
+    typeof report.install_output === 'string' &&
+    /npm (?:ERR!|error) (?:code (?:E404|ETARGET|ERESOLVE)|404)/.test(report.install_output);
+  if (installNotFound) {
+    reasons.push(`npm install failed (exit ${report.exit_code})`);
+    evidence = report.install_output.substring(0, 300);
+  }
+  if (typeof report.entrypoint_output === 'string' && /\[ENTRY_ERROR\]/.test(report.entrypoint_output)) {
+    reasons.push('Entry point require() failed');
+    if (!evidence) evidence = report.entrypoint_output.substring(0, 300);
+  }
+  if (ctx.telemetryMissing) {
+    reasons.push('no gVisor trace log (process, file and network telemetry unavailable)');
+    if (!evidence) evidence = 'runsc produced no --strace/--debug-log output for this container';
+  }
+  return reasons.length ? { reasons, evidence } : null;
+}
 
 function isGvisorAvailable() {
   if (_gvisorAvailableCache !== undefined) return _gvisorAvailableCache;
@@ -643,12 +673,24 @@ async function runSingleSandbox(packageName, options = {}) {
         return;
       }
 
+      let gvisorTelemetryMissing = false;
       // In gVisor mode, merge kernel-level strace data from gVisor debug logs.
       // sandbox-runner.sh skips strace/tcpdump in gVisor mode, so file access,
       // connections, and process data come from gVisor's kernel-level tracing.
       if (gvisorMode && gvisorContainerId) {
         const gvisorLogDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
         const gvisorData = syncStep('sandbox:gvisor-parse', { container: gvisorContainerId }, () => parseGvisorLogs(gvisorContainerId, gvisorLogDir));
+        if (!gvisorData.logFiles) {
+          // No runsc trace at all: the process / file / network sections below stay empty
+          // because nothing was recorded, not because nothing happened.
+          gvisorTelemetryMissing = true;
+          if (!_gvisorTelemetryWarned) {
+            _gvisorTelemetryWarned = true;
+            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} — process, file and network telemetry unavailable; runsc needs --strace --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
+          }
+        } else {
+          console.log(`[SANDBOX] gVisor trace logs: ${gvisorData.logFiles} file(s) parsed`);
+        }
 
         // Merge gVisor findings into report without duplicating
         if (!report.sensitive_files) report.sensitive_files = { read: [], written: [] };
@@ -730,24 +772,17 @@ async function runSingleSandbox(packageName, options = {}) {
       }, score + preloadScore));
 
       // ── Prevent false CLEAN when sandbox couldn't fully analyze ──
-      // If score is 0 but install or entry point failed, mark INCONCLUSIVE
-      // so downstream (monitor, webhook) doesn't treat this as confirmed benign.
+      // If score is 0 but the run could not observe the package (install or entry point
+      // failed, or the runtime produced no trace), mark INCONCLUSIVE so downstream
+      // (monitor, webhook) doesn't treat this as confirmed benign.
       if (finalScore === 0) {
-        const entryError = report.entrypoint_output &&
-          /\[ENTRY_ERROR\]/.test(report.entrypoint_output);
-        const installNotFound = report.exit_code !== 0 &&
-          report.exit_code !== undefined &&
-          report.install_output &&
-          /ERR! (?:code E404|404|code ETARGET|code ERESOLVE)/.test(report.install_output);
-        if (entryError || installNotFound) {
-          const reason = installNotFound
-            ? `npm install failed (exit ${report.exit_code})`
-            : 'Entry point require() failed';
+        const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing });
+        if (incomplete) {
           findings.push({
             type: 'sandbox_incomplete',
             severity: 'MEDIUM',
-            detail: `${reason} — behavioral analysis incomplete`,
-            evidence: ((installNotFound ? report.install_output : report.entrypoint_output) || '').substring(0, 300)
+            detail: `${incomplete.reasons.join('; ')} — behavioral analysis incomplete`,
+            evidence: incomplete.evidence
           });
           resolve({
             score: -1, severity: 'INCONCLUSIVE', findings, raw_report: report,
@@ -1290,4 +1325,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
