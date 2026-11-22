@@ -1862,6 +1862,9 @@ function applyContextualFPCaps(result, pkgMeta) {
       keywords: (pkgMeta && pkgMeta.keywords),
       bin: (pkgMeta && pkgMeta.bin),
     },
+    // Registry metadata (publish timeline), used by F1 to tell a first
+    // published version from a package with a release history.
+    npmRegistryMeta: (pkgMeta && pkgMeta.npmRegistryMeta) || null,
   };
 
   const applied = [];

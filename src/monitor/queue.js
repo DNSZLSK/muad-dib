@@ -795,6 +795,18 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
 
 // --- Package scanning ---
 
+/**
+ * Registry metadata handed to the scan worker, with `registry_version`: the
+ * version named by the registry feed for this queue item. The scanned
+ * package.json version is set by the publisher; this one is not. Returns a
+ * copy (the metadata object may be shared by the registry cache); null stays null.
+ */
+function workerRegistryMeta(meta, version) {
+  if (!meta || typeof meta !== 'object') return meta;
+  if (typeof version !== 'string' || version === '') return meta;
+  return { ...meta, registry_version: version };
+}
+
 async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, signal = null) {
   const startTime = Date.now();
   const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
@@ -1066,7 +1078,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       // the per-worker getPackageMetadata fetch (429-storm fix). npm only; the key
       // is set even when null ("main already tried, don't refetch"). pypi leaves it
       // absent so the worker takes the unchanged CLI/else-if path.
-      if (ecosystem === 'npm') scanContext.npmRegistryMeta = npmRegistryMeta;
+      if (ecosystem === 'npm') scanContext.npmRegistryMeta = workerRegistryMeta(npmRegistryMeta, version);
       const archiveThreats = extractionFindings(extractReport);
       if (archiveThreats.length > 0) scanContext.extractionFindings = archiveThreats;
       staticStart = Date.now();
@@ -2449,6 +2461,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
 
 module.exports = {
   ledgerFloorFields,
+  workerRegistryMeta,
   // Constants
   SCAN_CONCURRENCY,
   SCAN_TIMEOUT_MS,

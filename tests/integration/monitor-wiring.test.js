@@ -34,6 +34,17 @@ async function runMonitorWiringTests() {
   const webhook = require('../../src/monitor/webhook.js');
   const classify = require('../../src/monitor/classify.js');
 
+  test('WIRING: workerRegistryMeta adds the registry feed version on a copy', () => {
+    const meta = { time: { '1.0.0': '2026-11-20T10:00:00.000Z' }, scan_version: '9.9.9' };
+    const out = queue.workerRegistryMeta(meta, '1.0.0');
+    assert(out.registry_version === '1.0.0' && out.scan_version === '9.9.9' && out.time === meta.time,
+      'registry_version from the queue item, other fields kept');
+    assert(out !== meta && !('registry_version' in meta), 'the shared metadata object is not mutated');
+    assert(queue.workerRegistryMeta(null, '1.0.0') === null, 'null metadata stays null (main fetch failed)');
+    assert(queue.workerRegistryMeta(meta, null) === meta && queue.workerRegistryMeta(meta, '') === meta,
+      'no version from the feed: metadata unchanged');
+  });
+
   test('WIRING: processQueue takes 6 arguments (scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable)', () => {
     assert(queue.processQueue.length === 6,
       `processQueue.length should be 6, got ${queue.processQueue.length}`);
