@@ -35,7 +35,7 @@ const {
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { analyzePreloadLog } = require('./analyzer.js');
 const { classifyDomain } = require('./network-allowlist.js');
-const { parseGvisorLogs, cleanupGvisorLogs, gvisorLogDir: resolveGvisorLogDir } = require('./gvisor-parser.js');
+const { parseGvisorLogs, cleanupGvisorLogs, gvisorLogDir: resolveGvisorLogDir, TRACED_SYSCALLS } = require('./gvisor-parser.js');
 
 // ── Event-loop stall attribution for the sandbox's SYNCHRONOUS docker CLI calls ──
 // (2026-07-03) These execFileSync/execSync 'docker' calls run on the MAIN thread.
@@ -251,6 +251,7 @@ function imageExists() {
 let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
 let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
 let _gvisorTelemetryWarned = false; // throttle the missing-gVisor-trace warning to once per process
+let _gvisorUnusableWarned = false; // same, for a trace that exists but cannot be read
 let _mockDnsWarned = false;         // throttle the mock-network-not-in-DNS-path warning to once per process
 
 // First usable nameserver of a resolv.conf text: loopback addresses (127.0.0.0/8, ::1, the
@@ -303,21 +304,29 @@ function isSafeVersion(v) {
 function incompleteRunReasons(report, ctx = {}) {
   if (!report) return null;
   const reasons = [];
+  const kinds = []; // stable codes, one per reason (journal line per run, load counts)
   let evidence = '';
   if (typeof report.exit_code === 'number' && report.exit_code !== 0) {
     reasons.push(`npm install failed (exit ${report.exit_code})`);
+    kinds.push('install_failed');
     // npm prints its errors last.
     evidence = String(report.install_output || '').slice(-300);
   }
   if (typeof report.entrypoint_output === 'string' && /\[ENTRY_ERROR\]/.test(report.entrypoint_output)) {
     reasons.push('Entry point require() failed');
+    kinds.push('entry_failed');
     if (!evidence) evidence = report.entrypoint_output.substring(0, 300);
   }
   if (ctx.telemetryMissing) {
     reasons.push('no gVisor trace log (process, file and network telemetry unavailable)');
+    kinds.push('trace_missing');
     if (!evidence) evidence = 'runsc produced no --strace/--debug-log output for this container';
+  } else if (ctx.telemetryUnusable) {
+    reasons.push('gVisor trace unusable (process, file and network telemetry unavailable)');
+    kinds.push('trace_unusable');
+    if (!evidence) evidence = String(ctx.telemetryUnusable);
   }
-  return reasons.length ? { reasons, evidence } : null;
+  return reasons.length ? { reasons, kinds, evidence } : null;
 }
 
 function isGvisorAvailable() {
@@ -442,8 +451,10 @@ function buildDockerArgs(opts = {}) {
   // daemon.json must keep the trace flags next to the performance ones, otherwise the
   // runtime writes no trace and the report has no process / file / network data:
   //   "runsc": { "path": "/usr/local/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory",
-  //     "--strace", "--debug-log=/var/log/runsc/%ID%/", "--log-packets"] }
-  // (see scripts/install-gvisor.sh; the host reports runs without any trace as INCONCLUSIVE).
+  //     "--strace", "--strace-syscalls=openat,open,connect,execve,execveat,clone,clone3,fork,vfork",
+  //     "--debug-log=/var/log/runsc/%ID%/", "--log-packets"] }
+  // (see scripts/install-gvisor.sh; the host reports runs without a usable trace - none, an
+  // unknown format, or no clone/fork lines to find the package's processes - as INCONCLUSIVE).
   // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
   // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
   // These flags require gVisor >= 2023-06-01.
@@ -744,22 +755,33 @@ async function runSingleSandbox(packageName, options = {}) {
       }
 
       let gvisorTelemetryMissing = false;
+      let gvisorTelemetryUnusable = null;
       // In gVisor mode, merge kernel-level strace data from gVisor debug logs.
       // sandbox-runner.sh skips strace/tcpdump in gVisor mode, so file access,
       // connections, and process data come from gVisor's kernel-level tracing.
       if (gvisorMode && gvisorContainerId) {
         const gvisorLogDir = resolveGvisorLogDir();
+        const parseStart = Date.now();
         const gvisorData = syncStep('sandbox:gvisor-parse', { container: gvisorContainerId }, () => parseGvisorLogs(gvisorContainerId, gvisorLogDir));
+        const parseMs = Date.now() - parseStart; // synchronous on the main thread: logged to watch it
         if (!gvisorData.logFiles) {
           // No runsc trace at all: the process / file / network sections below stay empty
           // because nothing was recorded, not because nothing happened.
           gvisorTelemetryMissing = true;
           if (!_gvisorTelemetryWarned) {
             _gvisorTelemetryWarned = true;
-            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} - process, file and network telemetry unavailable; runsc needs --strace --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
+            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} - process, file and network telemetry unavailable; runsc needs --strace --strace-syscalls=${[...TRACED_SYSCALLS].join(',')} --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
+          }
+        } else if (gvisorData.unusable) {
+          // Logs exist but cannot be read as an observation (unknown format, or no package
+          // process tree): empty sections here would read as a clean run.
+          gvisorTelemetryUnusable = gvisorData.unusable;
+          if (!_gvisorUnusableWarned) {
+            _gvisorUnusableWarned = true;
+            console.warn(`[SANDBOX] WARNING: gVisor trace unusable - ${gvisorData.unusable} (${gvisorData.logFiles} file(s), ${gvisorData.straceLines} syscall line(s)). Runs with no other signal are reported INCONCLUSIVE.`);
           }
         } else {
-          console.log(`[SANDBOX] gVisor trace logs: ${gvisorData.logFiles} file(s) parsed`);
+          console.log(`[SANDBOX] gVisor trace logs: ${gvisorData.logFiles} file(s), ${gvisorData.straceLines} syscall line(s) parsed in ${parseMs} ms`);
         }
 
         // Merge gVisor findings into report without duplicating
@@ -846,8 +868,10 @@ async function runSingleSandbox(packageName, options = {}) {
       // failed, or the runtime produced no trace), mark INCONCLUSIVE so downstream
       // (monitor, webhook) doesn't treat this as confirmed benign.
       if (finalScore === 0) {
-        const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing });
+        const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing, telemetryUnusable: gvisorTelemetryUnusable });
         if (incomplete) {
+          // One line per run (the warnings above are printed once per process).
+          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')}`);
           findings.push({
             type: 'sandbox_incomplete',
             severity: 'MEDIUM',

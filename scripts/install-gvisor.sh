@@ -76,7 +76,9 @@ fi
 # runsc install adds the runtime to /etc/docker/daemon.json. Keep the trace flags next to the
 # performance ones: without --strace / --debug-log / --log-packets the runtime writes no
 # trace and every sandbox report lacks process, file and network data (reported INCONCLUSIVE
-# by the host). --strace-syscalls limits the trace to what gvisor-parser.js reads.
+# by the host). --strace-syscalls limits the trace to what gvisor-parser.js reads; the
+# clone/clone3/fork/vfork exits give it the process tree (only the processes started under
+# su are the package): without them every trace is reported unusable.
 #   --directfs, --overlay2=all:memory: performance (gVisor >= 2023-06-01)
 #   --log-packets: network at the gVisor kernel level (tcpdump needs AF_PACKET, unsupported)
 echo "[gVisor] Configuring Docker runtime..."
@@ -84,7 +86,7 @@ runsc install -- \
   --directfs \
   --overlay2=all:memory \
   --strace \
-  --strace-syscalls=openat,open,connect,execve,execveat \
+  --strace-syscalls=openat,open,connect,execve,execveat,clone,clone3,fork,vfork \
   --debug-log="${GVISOR_LOG_DIR}/%ID%/" \
   --log-packets
 
@@ -110,4 +112,4 @@ echo "Optional — refuse to run on weaker runc if gVisor is missing (fail close
 echo "  export MUADDIB_REQUIRE_GVISOR=1            # default: unset = fall back to runc with a WARNING"
 echo ""
 echo "Log directory: ${GVISOR_LOG_DIR}"
-echo "Runtime flags: --directfs --overlay2=all:memory --strace --strace-syscalls=openat,open,connect,execve,execveat --log-packets --debug-log=${GVISOR_LOG_DIR}/%ID%/"
+echo "Runtime flags: --directfs --overlay2=all:memory --strace --strace-syscalls=openat,open,connect,execve,execveat,clone,clone3,fork,vfork --log-packets --debug-log=${GVISOR_LOG_DIR}/%ID%/"
