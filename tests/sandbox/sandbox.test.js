@@ -1380,6 +1380,42 @@ async function runSandboxTests() {
     // 50 + 50 + 50 = 150 → capped at 100
     assert(score === 100, 'Score should cap at 100, got ' + score);
   });
+
+  // ── Journal lines for sandbox results (findings were kept nowhere but the follow-up webhook) ──
+  {
+    const { formatSandboxFindings, allRunsInconclusiveFinding, inconclusiveRunReason } = require('../../src/sandbox/index.js');
+
+    test('SANDBOX-LOG: a result line lists type, severity and evidence of each finding, on one line', () => {
+      const line = formatSandboxFindings([
+        { type: 'suspicious_process', severity: 'CRITICAL', detail: 'Dangerous command spawned: /usr/bin/python3', evidence: '/usr/bin/python3' },
+        { type: 'sensitive_file_read', severity: 'CRITICAL', evidence: '/home/sandboxuser/.npmrc\n[MONITOR] forged line' }
+      ]);
+      assert(line.includes('suspicious_process/CRITICAL: /usr/bin/python3'), 'got ' + line);
+      assert(line.includes('sensitive_file_read/CRITICAL: /home/sandboxuser/.npmrc'), 'got ' + line);
+      assert(!/[\r\n]/.test(line), 'a newline chosen by the package must not split the journal line, got ' + JSON.stringify(line));
+    });
+
+    test('SANDBOX-LOG: the result line is bounded (8 findings, 120 characters of evidence each)', () => {
+      const many = Array.from({ length: 12 }, (_, i) => ({ type: 't' + i, severity: 'LOW', evidence: 'x'.repeat(500) }));
+      const line = formatSandboxFindings(many);
+      assert(line.includes('+4 more') && !line.includes('t8/'), 'only the first 8 findings, got ' + line.slice(-60));
+      assert(line.length < 8 * 140 + 20, 'evidence is cut at 120 characters, length ' + line.length);
+    });
+
+    test('SANDBOX-LOG: all runs INCONCLUSIVE for another cause is not reported as a timeout', () => {
+      const runs = [
+        { reason: inconclusiveRunReason({ findings: [{ type: 'sandbox_incomplete', detail: 'Entry point require() failed — behavioral analysis incomplete' }] }), timedOut: false },
+        { reason: inconclusiveRunReason({ findings: [{ type: 'sandbox_incomplete', detail: 'Entry point require() failed — behavioral analysis incomplete' }] }), timedOut: false }
+      ];
+      const f = allRunsInconclusiveFinding(runs);
+      assert(f.type === 'sandbox_incomplete' && !/exceeded timeout/.test(f.detail) && /Entry point require\(\) failed/.test(f.detail), 'got ' + JSON.stringify(f));
+    });
+
+    test('SANDBOX-LOG: all runs timed out keeps the timeout finding', () => {
+      const f = allRunsInconclusiveFinding([{ reason: 'Container timeout', timedOut: true }, { reason: 'Container timeout', timedOut: true }]);
+      assert(f.type === 'timeout' && /All 2 runs exceeded timeout/.test(f.detail), 'got ' + JSON.stringify(f));
+    });
+  }
 }
 
 module.exports = { runSandboxTests };

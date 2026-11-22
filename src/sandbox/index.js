@@ -166,6 +166,50 @@ function inconclusiveResult(detail, evidence) {
   };
 }
 
+// ── Journal lines for sandbox results ──
+// Finding details and evidence carry strings the analyzed package chose (paths, hosts,
+// request bodies): control characters become spaces so one result is one journal line.
+function oneLine(s, max) {
+  const str = String(s === null || s === undefined ? '' : s).slice(0, max);
+  let out = '';
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    out += (c < 0x20 || c === 0x7f) ? ' ' : str[i];
+  }
+  return out;
+}
+
+/** "type/SEVERITY: evidence | ..." for the first `max` findings (journal line, not a report). */
+function formatSandboxFindings(findings, max = 8) {
+  const list = (findings || []).filter(f => f && f.type);
+  const shown = list.slice(0, max).map(f => `${f.type}/${f.severity || '?'}: ${oneLine(f.evidence || f.detail, 120)}`);
+  return shown.join(' | ') + (list.length > max ? ` | +${list.length - max} more` : '');
+}
+
+/** Why one run is INCONCLUSIVE: the detail of its incomplete / timeout finding. */
+function inconclusiveRunReason(runResult) {
+  const f = ((runResult && runResult.findings) || []).find(x => x && (x.type === 'sandbox_incomplete' || x.type === 'timeout'));
+  return f ? oneLine(f.detail, 160) : 'unknown';
+}
+
+/**
+ * Finding for a multi-run result whose runs were all INCONCLUSIVE. It said "All N runs
+ * exceeded timeout" whatever the cause (a failed entry point or install too); it now states
+ * the distinct reasons, and keeps the `timeout` type only when every run timed out.
+ */
+function allRunsInconclusiveFinding(allRuns) {
+  const reasons = [...new Set(allRuns.map(r => r.reason || 'unknown'))];
+  const allTimedOut = allRuns.every(r => r.timedOut);
+  return {
+    type: allTimedOut ? 'timeout' : 'sandbox_incomplete',
+    severity: 'MEDIUM',
+    detail: allTimedOut
+      ? `All ${allRuns.length} runs exceeded timeout — package too large or slow install`
+      : `All ${allRuns.length} runs inconclusive: ${reasons.join(' / ')}`,
+    evidence: `All ${allRuns.length} runs inconclusive (${reasons.length} distinct reason(s))`
+  };
+}
+
 // Time offsets for multi-run sandbox execution (ms)
 const TIME_OFFSETS = [
   { offset: 0, label: 'immediate' },
@@ -871,7 +915,7 @@ async function runSingleSandbox(packageName, options = {}) {
         const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing, telemetryUnusable: gvisorTelemetryUnusable });
         if (incomplete) {
           // One line per run (the warnings above are printed once per process).
-          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')}`);
+          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')} | evidence: ${oneLine(incomplete.evidence, 200)}`);
           findings.push({
             type: 'sandbox_incomplete',
             severity: 'MEDIUM',
@@ -888,6 +932,9 @@ async function runSingleSandbox(packageName, options = {}) {
 
       const severity = getSeverity(finalScore);
       const result = { score: finalScore, severity, findings, raw_report: report, suspicious: finalScore > 0 };
+      // One line per run with a positive score: the findings were kept nowhere but in the
+      // follow-up webhook (top 5), so a sandbox-driven alert could not be reviewed from the host.
+      if (finalScore > 0) console.log(`[SANDBOX] Run result: score=${finalScore} severity=${severity} findings: ${formatSandboxFindings(findings)}`);
 
       resolve(result);
     });
@@ -1030,13 +1077,16 @@ async function runSandbox(packageName, options = {}) {
         signal: options.signal || null
       });
 
+      const inconclusiveRun = runResult.score === -1;
       allRuns.push({
         run: i + 1,
         label,
         timeOffset: offset,
         score: runResult.score,
         severity: runResult.severity,
-        findingCount: runResult.findings.length
+        findingCount: runResult.findings.length,
+        reason: inconclusiveRun ? inconclusiveRunReason(runResult) : null,
+        timedOut: inconclusiveRun && (runResult.findings || []).some(f => f && f.type === 'timeout')
       });
 
       // Keep the result with the highest score
@@ -1057,12 +1107,7 @@ async function runSandbox(packageName, options = {}) {
       bestResult = {
         score: -1,
         severity: 'INCONCLUSIVE',
-        findings: [{
-          type: 'timeout',
-          severity: 'MEDIUM',
-          detail: `All ${allRuns.length} runs exceeded timeout — package too large or slow install`,
-          evidence: `All ${allRuns.length} runs timed out`
-        }],
+        findings: [allRunsInconclusiveFinding(allRuns)],
         raw_report: null,
         suspicious: false,
         inconclusive: true
@@ -1434,4 +1479,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, pickUpstreamNameserver, resolveSandboxUpstreamDns, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, pickUpstreamNameserver, resolveSandboxUpstreamDns, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers, formatSandboxFindings, allRunsInconclusiveFinding, inconclusiveRunReason };
