@@ -236,6 +236,17 @@ async function runGvisorTests() {
       assert(cmds.includes('/usr/bin/env') && cmds.includes('/usr/bin/timeout'), 'the exec that took effect must remain, got ' + JSON.stringify(cmds));
     });
 
+    test('GVISOR: the root npm reading ~/.gitconfig (its own config load, production trace) is not counted; a nested npm is', () => {
+      // Real lines, re-attributed: the npm process's real ~/.npmrc read, repeated for the
+      // ~/.gitconfig honeytoken (npm 11 reads it on every install in production traces).
+      const withGitconfig = (trace) => trace.split('\n').flatMap(l =>
+        /libuv-worker X openat\(.*\/\.npmrc, O_RDONLY.*= \d+ \(0x[0-9a-f]+\) \(/.test(l) ? [l, l.replace('/.npmrc,', '/.gitconfig,')] : [l]).join('\n');
+      const root = parseGvisorStrace(withGitconfig(INSTALLS.express));
+      assert(!root.sensitive_files.read.some(f => /\.gitconfig$/.test(f)), 'the root npm config read must not count, got ' + JSON.stringify(root.sensitive_files.read));
+      const nested = parseGvisorStrace(withGitconfig(load('runsc-20260323-nested-npm-express.log.gz')));
+      assert(nested.sensitive_files.read.some(f => /\.gitconfig$/.test(f)), 'an npm below the root must have its .gitconfig read counted, got ' + JSON.stringify(nested.sensitive_files.read));
+    });
+
     test('GVISOR: real trace - npm NOT started by the su shell (as by an install script) has its ~/.npmrc read counted', () => {
       const t = load('runsc-20260323-nested-npm-express.log.gz');
       const { parsed, scored } = score(t, true);

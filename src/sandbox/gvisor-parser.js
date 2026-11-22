@@ -353,8 +353,9 @@ function parseGvisorStrace(content) {
     }
   }
 
-  // The npm CLI started by a root shell reads ~/.npmrc (the honeytoken) on every install:
-  // that read is npm's own config load, not the package. Only that npm is exempt (the root
+  // The npm CLI started by a root shell reads ~/.npmrc and ~/.gitconfig (both honeytokens;
+  // .gitconfig seen in a production trace, npm 11) on every install: those reads are npm's
+  // own config load, not the package. Only that npm is exempt (the root
   // itself when the shell execs npm in place, or a direct child of the root); an npm
   // started by an install script (`npm config get ...` reads the token for the script)
   // is not.
@@ -375,7 +376,7 @@ function parseGvisorStrace(content) {
         const info = extractOpenatPath(ev.args, ev.syscall);
         if (!info || !SENSITIVE_PATTERN.test(info.path)) break;
         if (/O_WRONLY|O_RDWR|O_CREAT/.test(info.flags)) writes.add(info.path);
-        else if (!(rootNpm.has(ev.tgid) && /(?:^|\/)\.?npmrc$/.test(info.path))) reads.add(info.path);
+        else if (!(rootNpm.has(ev.tgid) && /(?:^|\/)(?:\.?npmrc|\.gitconfig)$/.test(info.path))) reads.add(info.path);
         break;
       }
       case 'execve':
