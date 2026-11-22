@@ -40,9 +40,11 @@ async function runAgainstTestImage() {
     name: 'runner-e2e-fixture', version: '1.0.0', main: 'index.js',
     // Looks up a safe domain, then writes and runs a small executable in the install
     // directory (as packages that ship a binary do): fails with EACCES on a noexec mount.
-    scripts: { postinstall: "node -e \"require('dns').lookup('github.com',()=>{});const f=require('fs');f.writeFileSync('/sandbox/install/probe.sh','#!/bin/sh\\nexit 0\\n',{mode:0o755});require('child_process').execFileSync('/sandbox/install/probe.sh')\"" }
+    // It also leaves a marker the entry point reports: npm 12 skips dependency install
+    // scripts unless allowed (--dangerously-allow-all-scripts in the runner), silently.
+    scripts: { postinstall: "node -e \"require('dns').lookup('github.com',()=>{});const f=require('fs');f.writeFileSync('/sandbox/install/postinstall-ran','1');f.writeFileSync('/sandbox/install/probe.sh','#!/bin/sh\\nexit 0\\n',{mode:0o755});require('child_process').execFileSync('/sandbox/install/probe.sh')\"" }
   }));
-  fs.writeFileSync(path.join(fixture, 'index.js'), 'module.exports = 1;\n');
+  fs.writeFileSync(path.join(fixture, 'index.js'), "if (require('fs').existsSync('/sandbox/install/postinstall-ran')) console.log('POSTINSTALL_RAN');\nmodule.exports = 1;\n");
 
   try {
     const args = buildDockerArgs({
@@ -60,6 +62,10 @@ async function runAgainstTestImage() {
       assert(report, 'the runner must print a parsable report, stderr tail: ' + String(run.stderr).slice(-300));
       assert(report.exit_code === 0, `npm install must succeed, exit_code=${report.exit_code}, install_output=${String(report.install_output).slice(-300)}`);
       assert(!/\[ENTRY_ERROR\]/.test(report.entrypoint_output || ''), 'the entry point must load: ' + String(report.entrypoint_output).slice(0, 300));
+    });
+
+    await asyncTest('SANDBOX-E2E: the dependency install script runs (not skipped by an npm allowScripts policy)', async () => {
+      assert(report && /POSTINSTALL_RAN/.test(report.entrypoint_output || ''), 'the postinstall must have run before the entry point, entrypoint_output=' + JSON.stringify(report && report.entrypoint_output));
     });
 
     // Registry install, as the monitor does it (by name and exact version): this one needs

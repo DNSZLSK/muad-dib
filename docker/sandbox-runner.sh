@@ -298,22 +298,26 @@ cd /sandbox/install
 # Ensure sandboxuser owns the install directory
 chown sandboxuser:sandboxuser /sandbox/install
 # Run npm install as sandboxuser via su, wrapped in strace for syscall tracing.
+# --dangerously-allow-all-scripts: npm 12 blocks dependency install scripts that no
+# allowScripts policy covers (npm 11 only warns), and --ignore-scripts=false does not lift
+# that. Without it a sandbox image on npm 12 would never run a preinstall/postinstall.
+# npm 11 accepts the flag.
 # gVisor mode: no strace wrapper — gVisor traces all syscalls at the kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 elif [ "$MODE" = "strict" ]; then
   su sandboxuser -s /bin/sh -c "
     strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace.log \
-      npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
+      npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 else
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 fi
 EXIT_CODE=$?
