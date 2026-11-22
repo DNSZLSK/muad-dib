@@ -1145,6 +1145,13 @@ function appendScanLedger(e) {
       // Static scan time (worker spawn to result, the clock of the 45 s kill), for the scans
       // that ran one. Lets a static-scan time bound be calibrated on production data.
       ...(Number.isFinite(e.staticMs) && e.staticMs >= 0 ? { staticMs: Math.round(e.staticMs) } : {}),
+      // Score-floor calibration (queue.js ledgerFloorFields): reputation factor and the
+      // score before it, score before the mature-package cap, HIGH/CRITICAL gate, floor
+      // signals. Lean-ledger rule: only when present.
+      ...(Number.isFinite(e.repFactor) && Number.isFinite(e.preRepScore) ? { repFactor: e.repFactor, preRepScore: e.preRepScore } : {}),
+      ...(Number.isFinite(e.matureCapFrom) ? { matureCapFrom: e.matureCapFrom } : {}),
+      ...(typeof e.hc === 'boolean' ? { hc: e.hc } : {}),
+      ...(e.floor && typeof e.floor === 'object' ? { floor: e.floor } : {}),
       source: e.source || 'scan'
     };
     fs.appendFileSync(SCAN_LEDGER_FILE, JSON.stringify(entry) + '\n', 'utf8');

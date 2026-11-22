@@ -15,6 +15,7 @@ function runMLFeatureExtractorTests() {
     networkDestinationFirstParty,
     installUrlGithubReleases,
     bundleWithoutInstallScripts,
+    isFirstPublishedVersion,
     gitHookSourceLocal,
     typosquatScopedPackage,
     obfuscationWithoutVector,
@@ -802,6 +803,62 @@ function runMLFeatureExtractorTests() {
     const meta = { registryMeta: { scripts: {} } };
     assert(bundleWithoutInstallScripts(result, meta) === false,
       'a payload planted in dist/ that is only a few KB must not be classed as a bundle');
+  });
+
+  // F1 and the publish timeline: the first published version has no release history.
+  const f1BundleResult = () => ({
+    threats: [
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'dist/index.min.js', message: 'minified' }
+    ],
+    summary: {
+      total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 78,
+      fileSizes: { 'dist/index.min.js': 300 * 1024 }
+    }
+  });
+  const f1Meta = (time, registryVersion) => ({
+    registryMeta: { scripts: {} },
+    npmRegistryMeta: { time, registry_version: registryVersion }
+  });
+
+  test('bundle_without_install_scripts: FALSE on the first published version of the package', () => {
+    const meta = f1Meta({ '1.0.0': '2026-11-20T10:00:00.000Z' }, '1.0.0');
+    assert(bundleWithoutInstallScripts(f1BundleResult(), meta) === false,
+      'no version published before the scanned one: the bundle has no release history');
+  });
+
+  test('bundle_without_install_scripts: TRUE when an earlier version exists in the timeline', () => {
+    const meta = f1Meta({ '1.0.0': '2026-11-19T10:00:00.000Z', '1.0.1': '2026-11-20T10:00:00.000Z' }, '1.0.1');
+    assert(bundleWithoutInstallScripts(f1BundleResult(), meta) === true,
+      'a later version of a package with history keeps the bundle cap');
+  });
+
+  test('bundle_without_install_scripts: a version published after another keeps the cap, whatever the gap', () => {
+    const meta = f1Meta({ '1.0.0': '2026-11-20T10:00:00.000Z', '1.0.1': '2026-11-20T10:02:00.000Z' }, '1.0.1');
+    assert(bundleWithoutInstallScripts(f1BundleResult(), meta) === true,
+      'only the first published version is excluded from the bundle cap');
+  });
+
+  test('bundle_without_install_scripts: TRUE without a registry version (CLI scan)', () => {
+    const meta = { registryMeta: { scripts: {} }, npmRegistryMeta: { time: { '1.0.0': '2026-11-20T10:00:00.000Z' }, scan_version: '1.0.0' } };
+    assert(bundleWithoutInstallScripts(f1BundleResult(), meta) === true,
+      'the package.json version is not a registry fact: no exclusion without registry_version');
+  });
+
+  test('isFirstPublishedVersion: later versions in the timeline do not count as history', () => {
+    const meta = { time: { '1.0.0': '2026-11-01T10:00:00.000Z', '1.0.1': '2026-11-02T10:00:00.000Z' }, registry_version: '1.0.0' };
+    assert(isFirstPublishedVersion(meta) === true, 'only versions published BEFORE the scanned one count');
+  });
+
+  test('isFirstPublishedVersion: FALSE when the timeline or the registry version is missing or unusable', () => {
+    const one = { '1.0.0': '2026-11-01T10:00:00.000Z' };
+    assert(isFirstPublishedVersion(null) === false, 'no registry metadata');
+    assert(isFirstPublishedVersion({ registry_version: '1.0.0' }) === false, 'no timeline');
+    assert(isFirstPublishedVersion({ time: {}, registry_version: '1.0.0' }) === false, 'empty timeline');
+    assert(isFirstPublishedVersion({ time: one }) === false, 'no registry version');
+    assert(isFirstPublishedVersion({ time: one, scan_version: '1.0.0' }) === false, 'package.json version only');
+    assert(isFirstPublishedVersion({ time: one, registry_version: '1.0.1' }) === false,
+      'registry version absent from the timeline (stale metadata)');
+    assert(isFirstPublishedVersion({ time: { '1.0.0': 'not a date' }, registry_version: '1.0.0' }) === false, 'unparsable date');
   });
 
   test('bundle_without_install_scripts: FALSE when postinstall script is present', () => {
