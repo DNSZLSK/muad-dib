@@ -521,6 +521,9 @@ if [ -f /tmp/mock-dns.log ]; then
   # dropped from the report: a download from a code-hosting release or a call to its
   # API left no trace. Kept in a separate field (not scored) so they stay visible.
   jq -r 'select(.safe == true) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u > /tmp/safe-dns-queries.txt
+  # IPv4 answers the upstream resolver gave for those safe names: the host does not count
+  # a connection to one of them (a registry download) as a suspicious connection.
+  jq -r 'select(.safe == true and (.answers | type) == "array") | .domain as $d | .answers[] | "\($d)\t\(.)"' /tmp/mock-dns.log 2>/dev/null | sort -u > /tmp/safe-dns-resolutions.txt
 fi
 if [ -f /tmp/mock-http.log ]; then
   echo "[SANDBOX] Parsing mock HTTP log..." >&2
@@ -579,6 +582,10 @@ jq_to_file 'split("\n") | map(select(length > 0)) | map(
 )' /tmp/dns-resolutions.txt /tmp/rpt-dns-res.json
 
 jq_to_file 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: (.[0] // ""), ip: (.[1] // "")}
+)' /tmp/safe-dns-resolutions.txt /tmp/rpt-safe-dns-res.json
+
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {method: (.[0] // ""), host: (.[1] // ""), path: (.[2] // "")}
 )' /tmp/http-requests.txt /tmp/rpt-http-req.json
 
@@ -618,6 +625,7 @@ REPORT_JSON=$(jq -n \
   --slurpfile sensitive_read /tmp/rpt-sens-read.json \
   --slurpfile sensitive_written /tmp/rpt-sens-written.json \
   --slurpfile dns_resolutions /tmp/rpt-dns-res.json \
+  --slurpfile safe_dns_resolutions /tmp/rpt-safe-dns-res.json \
   --slurpfile http_requests /tmp/rpt-http-req.json \
   --slurpfile http_bodies /tmp/rpt-http-bodies.json \
   --slurpfile tls_connections /tmp/rpt-tls.json \
@@ -639,6 +647,7 @@ REPORT_JSON=$(jq -n \
       dns_queries: $dns[0],
       safe_dns_queries: $safe_dns[0],
       dns_resolutions: $dns_resolutions[0],
+      safe_dns_resolutions: $safe_dns_resolutions[0],
       http_connections: $connections[0],
       http_requests: $http_requests[0],
       http_bodies: $http_bodies[0],
@@ -670,6 +679,6 @@ else
     [ ! -s "$_f" ] && echo "[SANDBOX] DIAG: $_f empty/missing" >&2
   done
   # Fallback minimal JSON so the host parser doesn't crash
-  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"safe_dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s,"mock_network":{"started":%s,"dns_in_path":%s}}\n' \
+  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"safe_dns_queries":[],"dns_resolutions":[],"safe_dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s,"mock_network":{"started":%s,"dns_in_path":%s}}\n' \
     "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}" "${MOCK_STARTED:-false}" "${MOCK_DNS_IN_PATH:-false}"
 fi

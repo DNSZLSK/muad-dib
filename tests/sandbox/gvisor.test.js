@@ -210,6 +210,24 @@ async function runGvisorTests() {
       sharp: load('runsc-20260323-install-sharp.log.gz')
     };
 
+    test('GVISOR: real express install - registry connects and npm\'s own ~/.npmrc read score 0', () => {
+      const t = INSTALLS.express;
+      assert((t.match(/ X connect\(.*AF_INET, Addr: /g) || []).length >= 10, 'fixture precondition: npm connects to the registry many times');
+      assert(/\] libuv-worker X openat\(.*\/tmp\/fxw\/\.npmrc, O_RDONLY.*= \d+ \(0x[0-9a-f]+\) \(/.test(t), 'fixture precondition: npm reads the honeytoken .npmrc successfully');
+      const { parsed, scored } = score(t, true);
+      assert(parsed.scoped && parsed.sensitive_files.read.length === 0, 'the root npm config read is not the package, got ' + JSON.stringify(parsed.sensitive_files));
+      assert(parsed.sensitive_files.written.length === 0, 'the honeytoken written by root (runner) is out of scope');
+      assert(scored.score === 0, 'a plain registry install must score 0, got ' + JSON.stringify(scored));
+      assert(score(t, false).scored.score === 25, 'the same connects with no safe resolution must still be flagged');
+    });
+
+    test('GVISOR: real installs with an install script stay under the alert threshold (esbuild, sharp: 15)', () => {
+      const es = score(INSTALLS.esbuild, true).scored;
+      assert(es.score === 15 && es.findings.length === 1 && /node_modules\/esbuild\/bin\/esbuild$/.test(es.findings[0].evidence), 'esbuild postinstall runs its own binary, got ' + JSON.stringify(es));
+      const sh = score(INSTALLS.sharp, true).scored;
+      assert(sh.score === 15 && sh.findings.length === 1 && sh.findings[0].evidence === '/usr/bin/which', 'sharp install/check runs which, got ' + JSON.stringify(sh));
+    });
+
     test('GVISOR: real trace - failed execs of a PATH search (printed "= 0", no errno) are not processes', () => {
       const t = INSTALLS.express;
       assert(/X execve\(0x[0-9a-f]+ \/usr\/local\/sbin\/env, .*\) = 0 \(0x0\) \(/.test(t), 'fixture precondition: the failed attempt is printed as a success');
@@ -269,6 +287,33 @@ async function runGvisorTests() {
       assert(r.straceLines > 0 && /no package process tree/.test(r.unusable || ''), 'got ' + r.unusable);
     });
   });
+
+  // ── scoreFindings: registry traffic seen by runsc is not a suspicious connection ──
+  {
+    const { scoreFindings } = require('../../src/sandbox/index.js');
+    const conns = parseGvisorStrace(BEHAV).network.http_connections; // [192.0.2.10:443] from the real trace
+
+    test('SANDBOX: a connection to an IP the sandbox resolver returned for a safe domain scores 0', () => {
+      const r = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'registry.npmjs.org', ip: '192.0.2.10' }] } });
+      assert(r.score === 0 && r.findings.length === 0, 'registry download must not score, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: a connection to an IP never resolved for a safe domain is still flagged', () => {
+      const none = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [] } });
+      assert(none.score === 25 && none.findings[0].type === 'suspicious_connection', 'got ' + JSON.stringify(none));
+      const other = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'registry.npmjs.org', ip: '192.0.2.11' }] } });
+      assert(other.score === 25, 'another IP of the registry does not cover this one, got ' + other.score);
+    });
+
+    test('SANDBOX: the safe-IP exemption needs a domain the host classifies safe, and port 80/443', () => {
+      const unsafe = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'collector.example', ip: '192.0.2.10' }] } });
+      assert(unsafe.score === 25, 'a resolver entry for a non-safe domain must not exempt (the host re-checks), got ' + unsafe.score);
+      const port = scoreFindings({ network: { http_connections: [{ host: '192.0.2.10', port: 22, protocol: 'TCP' }], safe_dns_resolutions: [{ domain: 'github.com', ip: '192.0.2.10' }] } });
+      assert(port.score === 25, 'only 80/443 are exempt, got ' + port.score);
+      const mock = scoreFindings({ network: { http_connections: [{ host: '127.0.0.2', port: 443, protocol: 'TCP' }], dns_resolutions: [{ domain: 'evil.example', ip: '127.0.0.2' }] } });
+      assert(mock.score === 25, 'a mock answer for a non-safe domain must not exempt, got ' + mock.score);
+    });
+  }
 
   // ── incompleteRunReasons: an unusable trace makes a score-0 run INCONCLUSIVE ──
   {

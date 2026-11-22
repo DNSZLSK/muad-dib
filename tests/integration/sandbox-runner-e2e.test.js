@@ -111,6 +111,10 @@ async function runAgainstTestImage() {
         'mock_network.dns_in_path must be true, got ' + JSON.stringify(report && report.mock_network));
       const safe = (report.network && report.network.safe_dns_queries) || [];
       assert(safe.includes('github.com'), 'the install-time lookup of github.com must be in network.safe_dns_queries, got ' + JSON.stringify(safe));
+      // The answers for safe names are kept: the host does not count a connection to them.
+      const res = (report.network && report.network.safe_dns_resolutions) || [];
+      assert(res.some(r => r.domain === 'github.com' && /^\d{1,3}(\.\d{1,3}){3}$/.test(r.ip)),
+        'the IPv4 answer for github.com must be in network.safe_dns_resolutions, got ' + JSON.stringify(res));
     });
   } finally {
     try { fs.rmSync(fixture, { recursive: true, force: true }); } catch { /* ignore */ }

@@ -1196,9 +1196,23 @@ function scoreFindings(report) {
   }
 
   // 5a. TCP connections — classify via network allowlist
+  // A connection carries only an IP. An IP that the sandbox resolver handed out for a
+  // domain the HOST classifies as safe (mock DNS answers, safe_dns_resolutions; or the
+  // tcpdump resolutions in runc mode), on 80/443, is the registry / code-hosting traffic
+  // of the install itself: without this every registry install scores 25 per IP.
+  // Known trade-off: the safe list includes multi-tenant hosts (GitHub, *.s3.amazonaws.com,
+  // storage.googleapis.com, jsDelivr, unpkg) and shared CDN addresses, so an upload to
+  // one of them (a gist, a bucket the attacker owns, a site fronted by the same CDN IP) is
+  // not seen through the DNS/IP signals - the same blind spot the DNS check (4a) already
+  // has for those domains. Payload-level signals (canary tokens in bodies) still apply.
+  const safeResolvedIps = new Set();
+  for (const r of [...(report.network?.safe_dns_resolutions || []), ...(report.network?.dns_resolutions || [])]) {
+    if (r && typeof r.ip === 'string' && classifyDomain(r.domain) === 'safe') safeResolvedIps.add(r.ip);
+  }
   for (const conn of (report.network?.http_connections || [])) {
     if (SAFE_IPS.includes(conn.host)) continue;
     if (PROBE_PORTS.includes(conn.port)) continue;
+    if (safeResolvedIps.has(conn.host) && (conn.port === 443 || conn.port === 80)) continue;
     const cls = classifyDomain(conn.host);
     if (cls === 'safe') continue;
     if (cls === 'blacklisted') {
