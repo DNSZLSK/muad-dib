@@ -120,6 +120,7 @@ const { runWebhookTests } = require('./report/webhook.test');
 const { runSandboxTests } = require('./sandbox/sandbox.test');
 const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
+const { runSandboxSafeDomainsTests } = require('./unit/sandbox-safe-domains.test');
 const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroboration.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
@@ -292,6 +293,7 @@ async function timed(name, fn) {
   await timed('sandbox', runSandboxTests);
   await timed('gvisor', runGvisorTests);
   await timed('preload', runPreloadTests);
+  await timed('sandbox-safe-domains', runSandboxSafeDomainsTests);
   await timed('string-ioc-corroboration', runStringIocCorroborationTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
   await timed('sandbox-runner-e2e', runSandboxRunnerE2ETests);
