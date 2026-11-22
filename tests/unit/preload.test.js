@@ -227,6 +227,85 @@ function runPreloadTests() {
     }
   });
 
+  // Sensitive-read classification. Node's CJS loader reads every module with
+  // fs.readFileSync and the ESM loader with fs.readFile(<file URL>): a module FILE whose
+  // name contains "credentials" (@grpc/grpc-js call-credentials.js) was logged as a
+  // SENSITIVE read (+20, and +40 more on any later network call). Loading code shipped in
+  // node_modules is not a secret read; a real secret (.aws/credentials, .npmrc) never is
+  // such a file. Each case gets its own temp tree.
+  function sensitiveReadsFor(relFile, readExpr) {
+    const os = require('os');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-preload-read-'));
+    try {
+      const target = root + path.sep + relFile; // raw: keeps '..' segments unnormalized
+      fs.mkdirSync(path.dirname(path.resolve(target)), { recursive: true });
+      // POSIX resolves 'node_modules/..' against the real directory: it must exist.
+      fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
+      fs.writeFileSync(target, 'module.exports = 1;\n');
+      const { log } = runWithPreload(readExpr(target));
+      return log.split('\n').filter(l => l.includes('FS_READ') && l.includes('SENSITIVE'));
+    } finally {
+      try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  }
+  const readSync = (p) => `require('fs').readFileSync(${JSON.stringify(p)})`;
+
+  test('PRELOAD: require() of a node_modules module named *credentials*.js is not a sensitive read', () => {
+    const hits = sensitiveReadsFor(path.join('node_modules', 'pkg', 'call-credentials.js'),
+      (p) => `require(${JSON.stringify(p)})`);
+    assert(hits.length === 0, `expected no SENSITIVE read for a module load, got ${hits.length}: ${hits[0] || ''}`);
+  });
+
+  test('PRELOAD: file-URL read of a node_modules *credentials*.js (ESM loader) is not a sensitive read', () => {
+    const hits = sensitiveReadsFor(path.join('node_modules', 'pkg', 'endpoint-credentials.js'),
+      (p) => `require('fs').readFileSync(require('url').pathToFileURL(${JSON.stringify(p)}))`);
+    assert(hits.length === 0, `expected no SENSITIVE read for a file-URL module read, got ${hits.length}: ${hits[0] || ''}`);
+  });
+
+  test('PRELOAD: reading .aws/credentials stays a sensitive read', () => {
+    const hits = sensitiveReadsFor(path.join('.aws', 'credentials'), readSync);
+    assert(hits.length === 1, `expected 1 SENSITIVE read for .aws/credentials, got ${hits.length}`);
+  });
+
+  test('PRELOAD: a node_modules file named credentials WITHOUT a code extension stays a sensitive read', () => {
+    const hits = sensitiveReadsFor(path.join('node_modules', 'pkg', 'credentials'), readSync);
+    assert(hits.length === 1, `expected 1 SENSITIVE read for node_modules/pkg/credentials, got ${hits.length}`);
+  });
+
+  test('PRELOAD: a node_modules/.. traversal to credentials.json stays a sensitive read', () => {
+    const hits = sensitiveReadsFor('node_modules/../credentials.json', readSync);
+    assert(hits.length === 1, `expected 1 SENSITIVE read for node_modules/../credentials.json, got ${hits.length}`);
+  });
+
+  // A read is classified on the file actually read, not only on the name asked for: a
+  // node_modules code-file name pointing elsewhere gets no exemption and no free pass.
+  {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-preload-link-'));
+    const secret = path.join(root, 'home', '.npmrc');
+    const link = path.join(root, 'node_modules', 'x', 'a.json');
+    let linked = false;
+    try {
+      fs.mkdirSync(path.dirname(secret), { recursive: true });
+      fs.mkdirSync(path.dirname(link), { recursive: true });
+      fs.writeFileSync(secret, '//registry.npmjs.org/:_authToken=x\n');
+      fs.symlinkSync(secret, link, 'file');
+      linked = true;
+    } catch { /* EPERM: symlinks need a privilege on Windows */ }
+    try {
+      if (linked) {
+        test('PRELOAD: reading a node_modules code-file symlink to .npmrc is a sensitive read', () => {
+          const { log } = runWithPreload(readSync(link));
+          const hits = log.split('\n').filter(l => l.includes('FS_READ') && l.includes('SENSITIVE'));
+          assert(hits.length === 1, `expected 1 SENSITIVE read for a symlink to .npmrc, got ${hits.length}`);
+        });
+      } else {
+        addSkipped(1, 'PRELOAD symlink read: cannot create a symlink here (Windows privilege)');
+      }
+    } finally {
+      try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  }
+
   test('PRELOAD: preload.js exists and is syntactically valid JS', () => {
     assert(fs.existsSync(PRELOAD_PATH), 'docker/preload.js should exist');
     new vm.Script(fs.readFileSync(PRELOAD_PATH, 'utf8')); // throws on syntax error

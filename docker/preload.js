@@ -20,6 +20,8 @@
 
   const _fs = require('fs');
   const _path = require('path');
+  const _url = require('url');
+  const _realpath = _fs.realpathSync.native || _fs.realpathSync;
   const _appendFileSync = _fs.appendFileSync;
   const _readFileSync = _fs.readFileSync;
   const _readFile = _fs.readFile;
@@ -85,6 +87,25 @@
 
   // Sensitive file patterns for FS interception
   const SENSITIVE_RE = /\.(npmrc|env|ssh|aws|gitconfig|bash_history)|id_rsa|credentials|\.gnupg|known_hosts|\.netrc/i;
+
+  // A read is sensitive when the path matches SENSITIVE_RE, except a code file inside a
+  // node_modules tree: Node's module loaders read every module this way (CJS with
+  // readFileSync(path), ESM with readFile(file URL)), so a module NAMED like
+  // call-credentials.js is code being loaded, not a secret. Real secrets (.aws/credentials,
+  // .npmrc, id_rsa) are never such files. A read is classified on the name asked for AND
+  // on the file actually read (real path, links followed); the exemption holds only when
+  // that real file is itself code under node_modules. When the real path cannot be
+  // resolved, a read whose name matches is counted.
+  const MODULE_CODE_RE = /\/node_modules\/.+\.(?:c?js|mjs|json|node)$/i;
+  function isSensitiveRead(p) {
+    const nameHit = SENSITIVE_RE.test(p);
+    let real = null;
+    try {
+      real = _realpath(/^file:/i.test(p) ? _url.fileURLToPath(p) : _path.resolve(p)).replace(/\\/g, '/');
+    } catch (e) { return nameHit; }
+    if (!nameHit && !SENSITIVE_RE.test(real)) return false;
+    return !MODULE_CODE_RE.test(real);
+  }
 
   // Dangerous commands for process interception
   const DANGEROUS_CMD_RE = /\b(curl|wget|nc|netcat|python|python3|bash|sh|powershell|cmd\.exe)\b/i;
@@ -571,7 +592,7 @@
     _fs.readFileSync = function (filePath) {
       try {
         const p = String(filePath);
-        if (SENSITIVE_RE.test(p)) {
+        if (isSensitiveRead(p)) {
           log('FS_READ', `SENSITIVE ${p}`);
         }
       } catch (e) { /* ignore */ }
@@ -584,7 +605,7 @@
     _fs.readFile = function (filePath) {
       try {
         const p = String(filePath);
-        if (SENSITIVE_RE.test(p)) {
+        if (isSensitiveRead(p)) {
           log('FS_READ', `SENSITIVE ${p}`);
         }
       } catch (e) { /* ignore */ }
@@ -624,7 +645,7 @@
       fsp.readFile = function (filePath) {
         try {
           const p = String(filePath);
-          if (SENSITIVE_RE.test(p)) {
+          if (isSensitiveRead(p)) {
             log('FS_READ', `SENSITIVE ${p}`);
           }
         } catch (e) { /* ignore */ }
