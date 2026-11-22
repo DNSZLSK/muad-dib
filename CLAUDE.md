@@ -91,6 +91,17 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 
 6. **CLI vs daemon** — Les commandes CLI sont des one-shots independants. Elles ne partagent pas les ressources du daemon (semaphores, slots, connexions). Elles verifient leurs prerequis dans les 5 premieres secondes et echouent bruyamment si manquant.
 
+## Methode de developpement
+
+Complete les regles ci-dessus (test positif ET negatif : Security mindset ; ecriture au fil de l'eau : Crash resilience).
+
+1. **TDD strict** : ecrire la liste des cas de test avant le code. Avant chaque rouge, annoncer quel test va echouer et avec quel message ; puis le vert ; puis le sabotage : retirer la garde, constater l'echec du test qui la couvre, la remettre.
+2. **Caracterisation avant refactoring** : avant de refactorer du code legacy (scoring, caps, queue), ecrire des tests de caracterisation qui figent le comportement actuel, bizarreries comprises (methode Gilded Rose, Emily Bache).
+3. **Petites etapes** : refactorer par petites etapes, tests relances a chaque etape. Jamais un changement de comportement et un refactoring dans le meme commit.
+4. **Golden master** : un jeu fixe de paquets aux scores approuves, rapide (moins d'une minute), lance en CI ; toute difference doit etre approuvee explicitement. A CREER : il n'existe pas encore (seuls existent le replay du ground truth et des mesures A/B lourdes, hors CI).
+5. **Pas de nouvelle logique dans les fichiers deja trop gros** (`src/monitor/queue.js`, `src/scoring.js`, `src/monitor/ingestion.js`, plus de 1 700 lignes chacun) : l'extraire dans un module dedie.
+6. **Mesurer avant de corriger**, sur des donnees reelles (vraies traces, vrai flux, vrais paquets), jamais sur un format reconstruit depuis le code.
+
 ## Post-Release Documentation Checklist
 
 After every version bump / npm publish, update these files:
