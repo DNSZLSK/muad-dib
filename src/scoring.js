@@ -2477,6 +2477,43 @@ function _refreshRiskLevel(result) {
           : rs > 0 ? 'LOW' : 'SAFE';
 }
 
+/**
+ * Read-only summary of the malice signals that the score floors look at, for the monitor
+ * scan ledger (calibration of the floors against the reputation factor and the severity
+ * reductions; no score is changed here).
+ *   sf:        single-fire floor types that qualify at their current severity
+ *   sfReduced: single-fire floor types whose original severity qualified but that a
+ *              reduction moved below the floor gate, with the reduction rule names
+ *   confirmed: the confirmed-malice predicate of the reputation floor
+ * Returns null when none of the three is present.
+ */
+function floorSignals(threats) {
+  if (!Array.isArray(threats)) return null;
+  const sf = new Set();
+  const sfReduced = new Map();
+  for (const t of threats) {
+    if (!t || !SINGLE_FIRE_CRITICAL_TYPES.has(t.type)) continue;
+    if (t.type === 'ioc_string_match' && t.iocUncorroborated) continue;
+    const minRank = SINGLE_FIRE_TYPE_MIN_RANK[t.type] !== undefined
+      ? SINGLE_FIRE_TYPE_MIN_RANK[t.type] : SINGLE_FIRE_MIN_SEVERITY_RANK;
+    const rank = _SEV_RANK[t.severity];
+    if (rank !== undefined && rank >= minRank) { sf.add(t.type); continue; }
+    const origRank = _SEV_RANK[t.originalSeverity];
+    if (origRank === undefined || origRank < minRank) continue;
+    const rules = Array.isArray(t.reductions) ? t.reductions.map(r => r && r.rule).filter(Boolean) : [];
+    const prev = sfReduced.get(t.type) || new Set();
+    for (const r of rules) prev.add(r);
+    sfReduced.set(t.type, prev);
+  }
+  const confirmed = _hasConfirmedMalice(threats);
+  if (sf.size === 0 && sfReduced.size === 0 && !confirmed) return null;
+  return {
+    sf: [...sf].sort(),
+    sfReduced: [...sfReduced].map(([type, rules]) => ({ type, rules: [...rules].sort() })).sort((a, b) => a.type.localeCompare(b.type)),
+    confirmed
+  };
+}
+
 // FPR plan Chantier 3 - delta-aware decay. Re-exported here so the pipeline
 // can call it after applyFPReductions and before applyCompoundBoosts (matching
 // the plan : compounds operate on freshly-introduced patterns, never on stable
@@ -2494,5 +2531,6 @@ module.exports = {
   applyFPReductions, applyCompoundBoosts, calculateRiskScore,
   applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,
   applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor,
-  applyStringIocCorroboration, STRING_IOC_CORROBORATION_TYPES
+  applyStringIocCorroboration, STRING_IOC_CORROBORATION_TYPES,
+  floorSignals
 };
