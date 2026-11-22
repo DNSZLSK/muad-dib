@@ -486,8 +486,12 @@ function buildDockerArgs(opts = {}) {
   // rewrite /etc/resolv.conf itself (that write failed silently and every query went to the
   // real resolver). Docker writes the container's resolv.conf at creation time instead; the
   // mock DNS forwards safe domains to upstreamDns (passed by env, unset by the runner).
+  // No search domain: Docker would otherwise copy the host's (a cloud host's internal
+  // domain), and a lookup that fails would be retried as <name>.<that domain>, logged by the
+  // mock DNS and scored as an unknown domain.
   if (upstreamDns) {
     dockerArgs.push('--dns', '127.0.0.1');
+    dockerArgs.push('--dns-search', '.');
     dockerArgs.push('-e', `MUADDIB_UPSTREAM_DNS=${upstreamDns}`);
   }
 

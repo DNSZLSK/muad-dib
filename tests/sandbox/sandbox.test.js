@@ -1072,6 +1072,16 @@ async function runSandboxTests() {
     assert(args.indexOf('--dns') < args.indexOf('muaddib-sandbox'), '--dns must be a docker option, before the image');
   });
 
+  // Without it, Docker copies the host's search domains into the container resolv.conf:
+  // a lookup that fails is retried as <name>.<host search domain> (seen in production as
+  // github.com.openstacklocal), which the mock DNS logs and the host scores as an unknown domain.
+  test('SANDBOX-DNS: with an upstream, the container gets no search domain (--dns-search .)', () => {
+    const args = buildDockerArgs({ packageName: 'x', mode: 'permissive', upstreamDns: '213.186.33.99', containerName: 't', fakeHostname: 'h' });
+    const i = args.indexOf('--dns-search');
+    assert(i > 0 && args[i + 1] === '.', 'expected --dns-search . (host search domains appended to package lookups), args=' + JSON.stringify(args));
+    assert(i < args.indexOf('muaddib-sandbox'), '--dns-search must be a docker option, before the image');
+  });
+
   test('SANDBOX-DNS: pickUpstreamNameserver skips loopback and the systemd-resolved stub', () => {
     const { pickUpstreamNameserver } = require('../../src/sandbox/index.js');
     assert(pickUpstreamNameserver('nameserver 127.0.0.53\noptions edns0') === null, 'stub only -> null (caller then reads the systemd upstream list)');
