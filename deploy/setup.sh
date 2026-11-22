@@ -108,7 +108,8 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
 # --- 5. Build Docker sandbox image ---
 echo "[5/6] Building Docker sandbox image..."
 if [ -d "$INSTALL_DIR/docker" ]; then
-  docker build -t muaddib-sandbox "$INSTALL_DIR/docker"
+  # Same path as the auto-update: labels the image with the docker/ tree it was built from.
+  bash "$INSTALL_DIR/deploy/refresh-sandbox-image.sh" "$INSTALL_DIR" /dev/stdout
   echo "  Sandbox image built."
 else
   echo "  No docker/ directory found, skipping sandbox image build."

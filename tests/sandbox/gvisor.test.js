@@ -21,231 +21,111 @@ async function runGvisorTests() {
 
   const { isGvisorAvailable } = require('../../src/sandbox/index.js');
 
-  // ── parseStraceLine ──
+  // ── Real runsc format (release-20260323.0, tests/samples/gvisor/runsc-20260323-*.log) ──
 
-  test('GVISOR: parseStraceLine parses Go-log-prefixed format', () => {
-    const line = 'D0331 12:34:56.789012       1 strace.go:587] [   1] node E openat(AT_FDCWD, "/etc/passwd", O_RDONLY) = 3 (0.1ms)';
-    const result = parseStraceLine(line);
-    assert(result !== null, 'Should parse line');
-    assert(result.pid === 1, 'PID should be 1, got ' + result.pid);
-    assert(result.process === 'node', 'Process should be node, got ' + result.process);
-    assert(result.syscall === 'openat', 'Syscall should be openat, got ' + result.syscall);
-    assert(result.args.includes('/etc/passwd'), 'Args should contain path');
-    assert(result.returnValue === '3', 'Return should be 3, got ' + result.returnValue);
+  const FIXTURE_DIR = path.join(__dirname, '..', 'samples', 'gvisor');
+  const BEHAV = fs.readFileSync(path.join(FIXTURE_DIR, 'runsc-20260323-behav.log'), 'utf8');
+  const behavLine = (re) => BEHAV.split('\n').find(l => re.test(l));
+
+  test('GVISOR: parseStraceLine reads a real runsc exit line (non-blocking connect = errno 115, ret 0)', () => {
+    const ev = parseStraceLine(behavLine(/X connect\(.*192\.0\.2\.10/));
+    assert(ev && ev.tgid === 4 && ev.tid === 4 && ev.comm === 'MainThread' && ev.phase === 'X' && ev.syscall === 'connect',
+      'prefix, comm and syscall must be read, got ' + JSON.stringify(ev));
+    assert(ev.ret === 0 && ev.errno === 115, 'runsc prints a failed syscall as "= 0 (0x0) errno=N": errno must be kept, got ' + JSON.stringify(ev));
   });
 
-  test('GVISOR: parseStraceLine parses bare format (no Go prefix)', () => {
-    const line = '[   1] python3 E connect(5, {Family: AF_INET, Addr: 1.2.3.4, Port: 443}, 16) = 0 (2.3ms)';
-    const result = parseStraceLine(line);
-    assert(result !== null, 'Should parse bare line');
-    assert(result.pid === 1, 'PID should be 1');
-    assert(result.process === 'python3', 'Process should be python3');
-    assert(result.syscall === 'connect', 'Syscall should be connect');
-    assert(result.returnValue === '0', 'Return should be 0');
+  test('GVISOR: parseStraceLine keeps a failed open as an error (= 0 (0x0) errno=2), not a success', () => {
+    const ev = parseStraceLine(behavLine(/X openat\(.*\.ssh\/id_rsa/));
+    assert(ev && ev.errno === 2 && ev.ret === 0, 'got ' + JSON.stringify(ev));
   });
 
-  test('GVISOR: parseStraceLine returns null for non-strace lines', () => {
-    assert(parseStraceLine('Some random log line') === null, 'Random line should return null');
-    assert(parseStraceLine('I0331 12:34:56.000000  1 sniffer.go:432] [SYN] 10.0.2.15:54321 > 1.2.3.4:80') === null, 'Packet log should return null');
-    assert(parseStraceLine('') === null, 'Empty line should return null');
+  test('GVISOR: parseStraceLine reads a task name with spaces (npm sets "npm install exp")', () => {
+    const line = 'I1121 23:46:30.140447       1 strace.go:605] [  11:  11] npm install exp X connect(0x15 socket:[24], 0x7efdb8364e60 {Family: AF_INET, Addr: 104.16.10.34, Port: 443}, 0x10) = 0 (0x0) errno=115 (operation now in progress) (77.12µs)';
+    const ev = parseStraceLine(line);
+    assert(ev && ev.comm === 'npm install exp' && ev.syscall === 'connect' && ev.tgid === 11, 'got ' + JSON.stringify(ev));
   });
 
-  test('GVISOR: parseStraceLine handles error return values', () => {
-    const line = '[   2] python3 E openat(AT_FDCWD, "/etc/shadow", O_RDONLY) = -1 (EACCES) (0.01ms)';
-    const result = parseStraceLine(line);
-    assert(result !== null, 'Should parse even failed syscalls');
-    assert(result.returnValue.startsWith('-'), 'Return should be negative');
+  test('GVISOR: a task name that imitates a syscall marker does not hide the real syscall', () => {
+    // Same real line, task name replaced by a 15-byte name that spells " X execve(".
+    const real = behavLine(/X connect\(.*192\.0\.2\.10/);
+    const forged = real.replace('] MainThread X connect(', '] ab X execve(zz X connect(');
+    const ev = parseStraceLine(forged);
+    assert(ev && ev.syscall === 'connect' && ev.comm === 'ab X execve(zz', 'the marker after the (<= 15 byte) name must win, got ' + JSON.stringify(ev));
   });
 
-  test('GVISOR: parseStraceLine handles microsecond durations', () => {
-    const line = '[   1] node E read(3, 0x7f0000, 832) = 832 (21.084µs)';
-    const result = parseStraceLine(line);
-    assert(result !== null, 'Should parse µs duration');
-    assert(result.returnValue === '832', 'Return should be 832');
+  test('GVISOR: the old made-up format is not accepted as a syscall line', () => {
+    assert(parseStraceLine('[   1] node E openat(AT_FDCWD, "/root/.npmrc", O_RDONLY) = 3 (0.1ms)') === null, 'fictional format must not parse');
+    assert(parseStraceLine('I1121 23:46:26.500657       1 boot.go:306] Setting product_name: "x"') === null, 'non-strace line');
   });
 
-  // ── extractOpenatPath ──
-
-  test('GVISOR: extractOpenatPath extracts path and flags (comma-separated)', () => {
-    const result = extractOpenatPath('AT_FDCWD, "/home/user/.npmrc", O_RDONLY|O_CLOEXEC');
-    assert(result !== null, 'Should extract');
-    assert(result.path === '/home/user/.npmrc', 'Path should match');
-    assert(result.flags.includes('O_RDONLY'), 'Flags should include O_RDONLY');
+  test('GVISOR: extractOpenatPath reads the unquoted path and flags; a relative path gets its directory fd', () => {
+    const ev = parseStraceLine(behavLine(/X openat\(.*\/etc\/passwd/));
+    const info = extractOpenatPath(ev.args, 'openat');
+    assert(info && info.path === '/etc/passwd' && /^O_RDONLY/.test(info.flags), 'got ' + JSON.stringify(info));
+    const rel = extractOpenatPath('0x5 /home/sandboxuser/.ssh, 0x7f00 id_rsa, O_RDONLY|O_CLOEXEC, 0o0', 'openat');
+    assert(rel && rel.path === '/home/sandboxuser/.ssh/id_rsa', 'openat(<fd of ~/.ssh>, "id_rsa") must resolve, got ' + JSON.stringify(rel));
+    const flags0 = extractOpenatPath('AT_FDCWD /tmp, 0x7eb7c4761669 /etc/os-release, O_RDONLY|0x0, 0o0', 'openat');
+    assert(flags0 && flags0.path === '/etc/os-release', 'flags written "O_RDONLY|0x0" (real cat line) must parse, got ' + JSON.stringify(flags0));
   });
 
-  test('GVISOR: extractOpenatPath extracts write flags', () => {
-    const result = extractOpenatPath('AT_FDCWD, "/root/.aws/credentials", O_WRONLY|O_CREAT, 0o644');
-    assert(result !== null, 'Should extract');
-    assert(result.path === '/root/.aws/credentials', 'Path should match');
-    assert(result.flags.includes('O_WRONLY'), 'Flags should include O_WRONLY');
-    assert(result.flags.includes('O_CREAT'), 'Flags should include O_CREAT');
+  test('GVISOR: extractExecveCommand reads path and argv; a path that embeds ", 0x1 [" is not cut short', () => {
+    const ev = parseStraceLine(behavLine(/X execve\(.*\/usr\/bin\/cat/));
+    const cmd = extractExecveCommand(ev.args, 'execve');
+    assert(cmd && cmd.path === '/usr/bin/cat' && cmd.argv[0] === 'cat', 'got ' + JSON.stringify(cmd));
+    const trap = extractExecveCommand('0x1000 /tmp/node, 0x1 [x, 0x2000 ["evil"], 0x3000 ["PATH=/bin"]', 'execve');
+    assert(trap && trap.path === '/tmp/node, 0x1 [x', 'a binary named "/tmp/node, 0x1 [x" must not read as node, got ' + JSON.stringify(trap));
+    const flood = extractExecveCommand('0x1000 ' + '/a, 0x1 ['.repeat(400) + '/tmp/node, 0x2000 ["x"], 0x3000 ["PATH=/bin"]', 'execve');
+    assert(flood && path.basename(flood.path) !== 'node', 'past the bounded number of split attempts the path must fail closed (not read as node), got ' + JSON.stringify(flood && flood.path.slice(-40)));
   });
 
-  test('GVISOR: extractOpenatPath returns null for unparseable args', () => {
-    assert(extractOpenatPath('invalid args') === null, 'Should return null');
+  test('GVISOR: extractConnectInfo reads IPv4 address and port', () => {
+    const ev = parseStraceLine(behavLine(/X connect\(.*192\.0\.2\.10/));
+    const c = extractConnectInfo(ev.args);
+    assert(c && c.ip === '192.0.2.10' && c.port === 443, 'got ' + JSON.stringify(c));
+    assert(extractConnectInfo('0x3 socket:[1], 0x7e {Family: AF_UNIX, Addr: "/dev/log"}, 0x6e') === null, 'AF_UNIX is not a network connection');
   });
 
-  // ── extractConnectInfo ──
+  // ── Whole real trace: only the package's processes (the subtree under su) count ──
 
-  test('GVISOR: extractConnectInfo extracts IP and port', () => {
-    const result = extractConnectInfo('5, {Family: AF_INET, Addr: 45.11.59.250, Port: 443}, 16');
-    assert(result !== null, 'Should extract');
-    assert(result.ip === '45.11.59.250', 'IP should match');
-    assert(result.port === 443, 'Port should be 443');
+  test('GVISOR: real trace - what the program under su did is reported', () => {
+    const r = parseGvisorStrace(BEHAV);
+    assert(r.scoped === true && r.straceLines > 100, 'the su subtree must be found, got ' + JSON.stringify({ scoped: r.scoped, lines: r.straceLines }));
+    const reads = r.sensitive_files.read;
+    assert(reads.some(f => /\/\.npmrc$/.test(f)), 'the program read of <home>/.npmrc must be reported, got ' + JSON.stringify(reads));
+    assert(reads.includes('/etc/passwd'), 'the program read of /etc/passwd must be reported');
+    assert(r.sensitive_files.written.some(f => /\/\.npmrc$/.test(f)), 'the program write of .npmrc must be reported');
+    assert(!reads.some(f => /id_rsa/.test(f)), 'a failed open (errno=2) must not count as a read');
+    const conns = r.network.http_connections.map(c => `${c.host}:${c.port}`);
+    assert(conns.length === 1 && conns[0] === '192.0.2.10:443', 'the in-progress connect must count, loopback must not, got ' + JSON.stringify(conns));
+    assert(r.processes.spawned.some(p => p.command === '/usr/bin/cat'), 'the grandchild cat must be reported');
   });
 
-  test('GVISOR: extractConnectInfo returns null for AF_INET6', () => {
-    const result = extractConnectInfo('5, {Family: AF_INET6, Addr: ::1, Port: 8080}, 28');
-    assert(result === null, 'Should return null for IPv6');
+  test('GVISOR: real trace - su itself (reads /etc/shadow, connects to nscd) is out of scope', () => {
+    assert(/\] su X openat\(.*\/etc\/shadow/.test(BEHAV) || /\] su X openat\(.*\/etc\/passwd/.test(BEHAV), 'fixture precondition: su opens account files');
+    const r = parseGvisorStrace(BEHAV);
+    assert(!r.sensitive_files.read.includes('/etc/shadow'), 'su reading /etc/shadow is the runner, not the package');
+    assert(!r.processes.spawned.some(p => /\/su$/.test(p.command)), 'su is the runner');
   });
 
-  test('GVISOR: extractConnectInfo returns null for unparseable args', () => {
-    assert(extractConnectInfo('invalid args') === null, 'Should return null');
+  test('GVISOR: real trace without clone/fork lines - no scope, nothing reported, trace unusable', () => {
+    const noClone = BEHAV.split('\n').filter(l => !/ X (clone|clone3|fork|vfork)\(/.test(l)).join('\n');
+    const r = parseGvisorStrace(noClone);
+    assert(r.scoped === false, 'without clone exits the su child cannot be tied to su');
+    assert(r.sensitive_files.read.length === 0 && r.network.http_connections.length === 0, 'nothing may be attributed without a scope');
   });
 
-  // ── extractExecveCommand ──
-
-  test('GVISOR: extractExecveCommand extracts command path', () => {
-    const result = extractExecveCommand('"/usr/bin/curl", ["curl", "-X", "POST"], []');
-    assert(result === '/usr/bin/curl', 'Should extract /usr/bin/curl');
-  });
-
-  test('GVISOR: extractExecveCommand returns null for empty args', () => {
-    assert(extractExecveCommand('') === null, 'Should return null');
-  });
-
-  // ── parseGvisorStrace (full log parsing) ──
-
-  test('GVISOR: parseGvisorStrace parses fixture log — sensitive reads', () => {
-    const fixturePath = path.join(__dirname, '..', 'samples', 'gvisor', 'strace-sample.log');
-    const content = fs.readFileSync(fixturePath, 'utf8');
-    const result = parseGvisorStrace(content);
-
-    const reads = result.sensitive_files.read;
-    assert(reads.includes('/home/sandboxuser/.npmrc'), 'Should detect .npmrc read');
-    assert(reads.includes('/home/sandboxuser/.ssh/id_rsa'), 'Should detect .ssh read');
-    assert(reads.includes('/etc/passwd'), 'Should detect /etc/passwd read');
-    assert(reads.includes('/home/sandboxuser/.env'), 'Should detect .env read');
-    // /etc/shadow should NOT be included (return = -1 EACCES)
-    assert(!reads.includes('/etc/shadow'), 'Should skip failed /etc/shadow read');
-  });
-
-  test('GVISOR: parseGvisorStrace parses fixture log — sensitive writes', () => {
-    const fixturePath = path.join(__dirname, '..', 'samples', 'gvisor', 'strace-sample.log');
-    const content = fs.readFileSync(fixturePath, 'utf8');
-    const result = parseGvisorStrace(content);
-
-    const writes = result.sensitive_files.written;
-    assert(writes.includes('/home/sandboxuser/.aws/credentials'), 'Should detect .aws write');
-    assert(writes.length === 1, 'Should have exactly 1 write, got ' + writes.length);
-  });
-
-  test('GVISOR: parseGvisorStrace parses fixture log — connections', () => {
-    const fixturePath = path.join(__dirname, '..', 'samples', 'gvisor', 'strace-sample.log');
-    const content = fs.readFileSync(fixturePath, 'utf8');
-    const result = parseGvisorStrace(content);
-
-    const conns = result.network.http_connections;
-    const ips = conns.map(c => c.host);
-    assert(ips.includes('45.11.59.250'), 'Should detect C2 IP');
-    assert(ips.includes('93.184.216.34'), 'Should detect HTTP IP');
-    assert(!ips.includes('127.0.0.1'), 'Should skip loopback');
-    assert(!ips.includes('10.0.0.1'), 'Should skip probe port 65535');
-
-    // Deduplication: 45.11.59.250:443 appears twice, should be deduped
-    const c2Conns = conns.filter(c => c.host === '45.11.59.250');
-    assert(c2Conns.length === 1, 'Should dedup duplicate connections, got ' + c2Conns.length);
-  });
-
-  test('GVISOR: parseGvisorStrace parses fixture log — processes', () => {
-    const fixturePath = path.join(__dirname, '..', 'samples', 'gvisor', 'strace-sample.log');
-    const content = fs.readFileSync(fixturePath, 'utf8');
-    const result = parseGvisorStrace(content);
-
-    const cmds = result.processes.spawned.map(p => p.command);
-    assert(cmds.includes('/usr/bin/curl'), 'Should detect curl');
-    assert(cmds.includes('/usr/bin/wget'), 'Should detect wget');
-    // Safe processes should be excluded
-    assert(!cmds.includes('/usr/local/bin/node'), 'Should skip node (safe)');
-    assert(!cmds.includes('/usr/bin/npm'), 'Should skip npm (safe)');
-  });
-
-  // ── Output format parity with strace parser ──
-
-  test('GVISOR: output format matches sandbox report structure — connections', () => {
-    const content = '[   1] node E connect(5, {Family: AF_INET, Addr: 1.2.3.4, Port: 8080}, 16) = 0 (1ms)';
-    const result = parseGvisorStrace(content);
-
-    assert(Array.isArray(result.network.http_connections), 'http_connections should be array');
-    assert(result.network.http_connections.length === 1, 'Should have 1 connection');
-    const conn = result.network.http_connections[0];
-    assert(conn.host === '1.2.3.4', 'host field should be IP string');
-    assert(conn.port === 8080, 'port field should be number');
-    assert(conn.protocol === 'TCP', 'protocol field should be TCP');
-  });
-
-  test('GVISOR: output format matches sandbox report structure — processes', () => {
-    const content = '[   42] sh E execve("/usr/bin/curl", ["curl", "http://evil.com"], []) = 0 (1ms)';
-    const result = parseGvisorStrace(content);
-
-    assert(Array.isArray(result.processes.spawned), 'spawned should be array');
-    assert(result.processes.spawned.length === 1, 'Should have 1 process');
-    const proc = result.processes.spawned[0];
-    assert(typeof proc.command === 'string', 'command should be string');
-    assert(typeof proc.pid === 'number', 'pid should be number');
-    assert(proc.command === '/usr/bin/curl', 'command should be /usr/bin/curl');
-    assert(proc.pid === 42, 'pid should be 42');
-  });
-
-  test('GVISOR: output format matches sandbox report structure — sensitive files', () => {
-    const content = '[   1] node E openat(AT_FDCWD, "/root/.npmrc", O_RDONLY) = 3 (0.1ms)';
-    const result = parseGvisorStrace(content);
-
-    assert(Array.isArray(result.sensitive_files.read), 'read should be array');
-    assert(Array.isArray(result.sensitive_files.written), 'written should be array');
-    assert(result.sensitive_files.read.length === 1, 'Should have 1 read');
-    assert(result.sensitive_files.read[0] === '/root/.npmrc', 'Should be /root/.npmrc');
-    assert(result.sensitive_files.written.length === 0, 'Should have 0 writes');
-  });
-
-  // ── Empty/edge cases ──
-
-  test('GVISOR: parseGvisorStrace handles empty input', () => {
-    const result = parseGvisorStrace('');
-    assert(result.sensitive_files.read.length === 0, 'No reads');
-    assert(result.sensitive_files.written.length === 0, 'No writes');
-    assert(result.network.http_connections.length === 0, 'No connections');
-    assert(result.processes.spawned.length === 0, 'No processes');
-  });
-
-  test('GVISOR: parseGvisorStrace handles all-noise input', () => {
-    const content = 'I0331 12:00:00.000  1 boot.go:1] Starting gVisor\nSome random line\n\n';
-    const result = parseGvisorStrace(content);
-    assert(result.sensitive_files.read.length === 0, 'No reads');
-    assert(result.network.http_connections.length === 0, 'No connections');
-  });
-
-  test('GVISOR: parseGvisorStrace skips non-sensitive file access', () => {
-    const content = '[   1] node E openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3 (0.1ms)';
-    const result = parseGvisorStrace(content);
-    assert(result.sensitive_files.read.length === 0, 'ld.so.cache is not sensitive');
-  });
-
-  // ── parseGvisorLog (file-based) ──
-
-  test('GVISOR: parseGvisorLog reads fixture file', () => {
-    const fixturePath = path.join(__dirname, '..', 'samples', 'gvisor', 'strace-sample.log');
-    const result = parseGvisorLog(fixturePath);
-    assert(result.sensitive_files.read.length > 0, 'Should find sensitive reads');
-    assert(result.network.http_connections.length > 0, 'Should find connections');
-    assert(result.processes.spawned.length > 0, 'Should find processes');
-  });
-
-  test('GVISOR: parseGvisorLog returns empty for nonexistent file', () => {
-    const result = parseGvisorLog('/nonexistent/path/gvisor.log');
-    assert(result.sensitive_files.read.length === 0, 'No reads');
-    assert(result.network.http_connections.length === 0, 'No connections');
-    assert(result.processes.spawned.length === 0, 'No processes');
+  test('GVISOR: busybox su (execs the shell in place, no fork) - the shell is still a root', () => {
+    // Real lines, re-attributed: tgid 2 execs su, then execs /bin/sh itself (busybox su),
+    // then the program (tgid 4) runs as its child exactly as in the fixture.
+    const lines = BEHAV.split('\n');
+    const suExec = lines.find(l => /\[   2:   2\] sh X execve\(.*\/usr\/bin\/su/.test(l));
+    const suReadsPasswd = lines.find(l => /\[   2:   2\] su X openat\(.*\/etc\/passwd/.test(l)); // su runs before it execs the shell
+    const shExec = lines.find(l => /\[   3:   3\] su X execve\(.*\/bin\/sh/.test(l)).replace('[   3:   3] su X', '[   2:   2] su X');
+    const rest = lines.filter(l => /\[   [4-9]:|\[  1[0-9]:/.test(l));
+    const vfork = lines.find(l => /\[   3:   3\] sh X vfork\(\) = 4/.test(l)).replace('[   3:   3]', '[   2:   2]');
+    const r = parseGvisorStrace([suExec, suReadsPasswd, shExec, vfork, ...rest].join('\n'));
+    assert(r.scoped === true, 'a shell exec\'d by the su image itself must be a root');
+    assert(r.network.http_connections.some(c => c.host === '192.0.2.10'), 'the program under it must be in scope');
   });
 
   // ── findGvisorLogs ──
@@ -311,30 +191,87 @@ async function runGvisorTests() {
     cleanupGvisorLogs('nonexistent-id', '/nonexistent/path');
   });
 
+  // ── Real installs with the runner's lineage (root writes the honeytoken, su shell runs npm) ──
+  {
+    const zlib = require('zlib');
+    const { scoreFindings } = require('../../src/sandbox/index.js');
+    const load = (name) => zlib.gunzipSync(fs.readFileSync(path.join(FIXTURE_DIR, name))).toString('utf8');
+    // The registry IP the sandbox resolver would have answered: the run.sh argument in the trace.
+    const regIp = (trace) => (trace.match(/FX_REG_IP=(\d+\.\d+\.\d+\.\d+)/) || trace.match(/\/usr\/bin\/npm (\d+\.\d+\.\d+\.\d+)/))[1];
+    const score = (trace, withSafe) => {
+      const r = parseGvisorStrace(trace);
+      const network = { http_connections: r.network.http_connections };
+      if (withSafe) network.safe_dns_resolutions = [{ domain: 'registry.npmjs.org', ip: regIp(trace) }];
+      return { parsed: r, scored: scoreFindings({ sensitive_files: r.sensitive_files, network, processes: r.processes }) };
+    };
+    const INSTALLS = {
+      express: load('runsc-20260323-install-express.log.gz'),
+      esbuild: load('runsc-20260323-install-esbuild.log.gz'),
+      sharp: load('runsc-20260323-install-sharp.log.gz')
+    };
+
+    test('GVISOR: real express install - registry connects and npm\'s own ~/.npmrc read score 0', () => {
+      const t = INSTALLS.express;
+      assert((t.match(/ X connect\(.*AF_INET, Addr: /g) || []).length >= 10, 'fixture precondition: npm connects to the registry many times');
+      assert(/\] libuv-worker X openat\(.*\/tmp\/fxw\/\.npmrc, O_RDONLY.*= \d+ \(0x[0-9a-f]+\) \(/.test(t), 'fixture precondition: npm reads the honeytoken .npmrc successfully');
+      const { parsed, scored } = score(t, true);
+      assert(parsed.scoped && parsed.sensitive_files.read.length === 0, 'the root npm config read is not the package, got ' + JSON.stringify(parsed.sensitive_files));
+      assert(parsed.sensitive_files.written.length === 0, 'the honeytoken written by root (runner) is out of scope');
+      assert(scored.score === 0, 'a plain registry install must score 0, got ' + JSON.stringify(scored));
+      assert(score(t, false).scored.score === 25, 'the same connects with no safe resolution must still be flagged');
+    });
+
+    test('GVISOR: real installs with an install script stay under the alert threshold (esbuild, sharp: 15)', () => {
+      const es = score(INSTALLS.esbuild, true).scored;
+      assert(es.score === 15 && es.findings.length === 1 && /node_modules\/esbuild\/bin\/esbuild$/.test(es.findings[0].evidence), 'esbuild postinstall runs its own binary, got ' + JSON.stringify(es));
+      const sh = score(INSTALLS.sharp, true).scored;
+      assert(sh.score === 15 && sh.findings.length === 1 && sh.findings[0].evidence === '/usr/bin/which', 'sharp install/check runs which, got ' + JSON.stringify(sh));
+    });
+
+    test('GVISOR: real trace - failed execs of a PATH search (printed "= 0", no errno) are not processes', () => {
+      const t = INSTALLS.express;
+      assert(/X execve\(0x[0-9a-f]+ \/usr\/local\/sbin\/env, .*\) = 0 \(0x0\) \(/.test(t), 'fixture precondition: the failed attempt is printed as a success');
+      const cmds = parseGvisorStrace(t).processes.spawned.map(p => p.command);
+      assert(!cmds.includes('/usr/local/sbin/env') && !cmds.includes('/usr/local/bin/env') && !cmds.includes('/usr/sbin/env'), 'PATH attempts must not be processes, got ' + JSON.stringify(cmds));
+      assert(cmds.includes('/usr/bin/env') && cmds.includes('/usr/bin/timeout'), 'the exec that took effect must remain, got ' + JSON.stringify(cmds));
+    });
+
+    test('GVISOR: the root npm reading ~/.gitconfig (its own config load, production trace) is not counted; a nested npm is', () => {
+      // Real lines, re-attributed: the npm process's real ~/.npmrc read, repeated for the
+      // ~/.gitconfig honeytoken (npm 11 reads it on every install in production traces).
+      const withGitconfig = (trace) => trace.split('\n').flatMap(l =>
+        /libuv-worker X openat\(.*\/\.npmrc, O_RDONLY.*= \d+ \(0x[0-9a-f]+\) \(/.test(l) ? [l, l.replace('/.npmrc,', '/.gitconfig,')] : [l]).join('\n');
+      const root = parseGvisorStrace(withGitconfig(INSTALLS.express));
+      assert(!root.sensitive_files.read.some(f => /\.gitconfig$/.test(f)), 'the root npm config read must not count, got ' + JSON.stringify(root.sensitive_files.read));
+      const nested = parseGvisorStrace(withGitconfig(load('runsc-20260323-nested-npm-express.log.gz')));
+      assert(nested.sensitive_files.read.some(f => /\.gitconfig$/.test(f)), 'an npm below the root must have its .gitconfig read counted, got ' + JSON.stringify(nested.sensitive_files.read));
+    });
+
+    test('GVISOR: real trace - npm NOT started by the su shell (as by an install script) has its ~/.npmrc read counted', () => {
+      const t = load('runsc-20260323-nested-npm-express.log.gz');
+      const { parsed, scored } = score(t, true);
+      assert(parsed.sensitive_files.read.some(f => /\/\.npmrc$/.test(f)), 'npm started below the root (npm config get in a script reads the token) must be reported, got ' + JSON.stringify(parsed.sensitive_files));
+      assert(scored.findings.some(f => f.type === 'sensitive_file_read' && f.severity === 'CRITICAL'), 'got ' + JSON.stringify(scored.findings));
+    });
+  }
+
   // ── parseGvisorLogs (aggregated, multi-file) ──
 
-  test('GVISOR: parseGvisorLogs aggregates across multiple log files', () => {
-    const tmpDir = path.join(__dirname, '..', 'samples', 'gvisor', 'tmp-multi');
-    const containerDir = path.join(tmpDir, 'multi-test');
+  const withLogDir = (name, files, fn) => {
+    const tmpDir = path.join(__dirname, '..', 'samples', 'gvisor', 'tmp-' + name);
+    const containerDir = path.join(tmpDir, name);
     fs.mkdirSync(containerDir, { recursive: true });
+    for (const [file, content] of Object.entries(files)) fs.writeFileSync(path.join(containerDir, file), content);
+    try { return fn(tmpDir, name); } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  };
 
-    // Write two log files with different findings
-    fs.writeFileSync(path.join(containerDir, 'boot.log'),
-      '[   1] node E openat(AT_FDCWD, "/root/.npmrc", O_RDONLY) = 3 (0.1ms)\n' +
-      '[   1] node E connect(5, {Family: AF_INET, Addr: 1.2.3.4, Port: 443}, 16) = 0 (1ms)\n'
-    );
-    fs.writeFileSync(path.join(containerDir, 'gofer.log'),
-      '[   1] node E openat(AT_FDCWD, "/root/.ssh/id_rsa", O_RDONLY) = 4 (0.1ms)\n' +
-      '[   1] node E connect(6, {Family: AF_INET, Addr: 5.6.7.8, Port: 80}, 16) = 0 (1ms)\n'
-    );
-
-    try {
-      const result = parseGvisorLogs('multi-test', tmpDir);
-      assert(result.sensitive_files.read.length === 2, 'Should aggregate 2 reads from 2 files, got ' + result.sensitive_files.read.length);
-      assert(result.network.http_connections.length === 2, 'Should aggregate 2 connections, got ' + result.network.http_connections.length);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  test('GVISOR: parseGvisorLogs reads a real trace next to an empty gofer log', () => {
+    withLogDir('agg', { 'runsc.log.boot.txt': BEHAV, 'gofer.log': '' }, (dir, id) => {
+      const r = parseGvisorLogs(id, dir);
+      assert(r.logFiles === 2, 'logFiles should count the 2 trace logs, got ' + r.logFiles);
+      assert(r.straceLines > 100 && r.scoped === true && r.unusable === null, 'got ' + JSON.stringify({ l: r.straceLines, s: r.scoped, u: r.unusable }));
+      assert(r.network.http_connections.length === 1, 'got ' + JSON.stringify(r.network.http_connections));
+    });
   });
 
   test('GVISOR: parseGvisorLogs returns empty for unknown container', () => {
@@ -342,7 +279,107 @@ async function runGvisorTests() {
     assert(result.sensitive_files.read.length === 0, 'No reads');
     assert(result.network.http_connections.length === 0, 'No connections');
     assert(result.processes.spawned.length === 0, 'No processes');
+    assert(result.logFiles === 0, 'logFiles must be 0 when no trace log exists (absence of telemetry, not an empty observation), got ' + result.logFiles);
   });
+
+  test('GVISOR: a non-empty log with no recognized syscall line is unusable (unknown format), not clean', () => {
+    const fictional = '[   1] node E openat(AT_FDCWD, "/root/.npmrc", O_RDONLY) = 3 (0.1ms)\n[   1] node E connect(5, {Family: AF_INET, Addr: 1.2.3.4, Port: 443}, 16) = 0 (1ms)\n';
+    withLogDir('fmt', { 'boot.log': fictional }, (dir, id) => {
+      const r = parseGvisorLogs(id, dir);
+      assert(r.logFiles === 1 && r.straceLines === 0, 'got ' + JSON.stringify({ f: r.logFiles, l: r.straceLines }));
+      assert(/unknown runsc strace format/.test(r.unusable || ''), 'unknown format must be reported, got ' + r.unusable);
+    });
+  });
+
+  test('GVISOR: a real trace without clone/fork (old --strace-syscalls) is unusable: no package process tree', () => {
+    const noClone = BEHAV.split('\n').filter(l => !/ X (clone|clone3|fork|vfork)\(/.test(l)).join('\n');
+    withLogDir('noclone', { 'boot.log': noClone }, (dir, id) => {
+      const r = parseGvisorLogs(id, dir);
+      assert(r.straceLines > 0 && /no package process tree/.test(r.unusable || ''), 'got ' + r.unusable);
+    });
+  });
+
+  // ── scoreFindings: registry traffic seen by runsc is not a suspicious connection ──
+  {
+    const { scoreFindings } = require('../../src/sandbox/index.js');
+    const conns = parseGvisorStrace(BEHAV).network.http_connections; // [192.0.2.10:443] from the real trace
+
+    test('SANDBOX: a connection to an IP the sandbox resolver returned for a safe domain scores 0', () => {
+      const r = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'registry.npmjs.org', ip: '192.0.2.10' }] } });
+      assert(r.score === 0 && r.findings.length === 0, 'registry download must not score, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: a connection to an IP never resolved for a safe domain is still flagged', () => {
+      const none = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [] } });
+      assert(none.score === 25 && none.findings[0].type === 'suspicious_connection', 'got ' + JSON.stringify(none));
+      const other = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'registry.npmjs.org', ip: '192.0.2.11' }] } });
+      assert(other.score === 25, 'another IP of the registry does not cover this one, got ' + other.score);
+    });
+
+    test('SANDBOX: the safe-IP exemption needs a domain the host classifies safe, and port 80/443', () => {
+      const unsafe = scoreFindings({ network: { http_connections: conns, safe_dns_resolutions: [{ domain: 'collector.example', ip: '192.0.2.10' }] } });
+      assert(unsafe.score === 25, 'a resolver entry for a non-safe domain must not exempt (the host re-checks), got ' + unsafe.score);
+      const port = scoreFindings({ network: { http_connections: [{ host: '192.0.2.10', port: 22, protocol: 'TCP' }], safe_dns_resolutions: [{ domain: 'github.com', ip: '192.0.2.10' }] } });
+      assert(port.score === 25, 'only 80/443 are exempt, got ' + port.score);
+      const mock = scoreFindings({ network: { http_connections: [{ host: '127.0.0.2', port: 443, protocol: 'TCP' }], dns_resolutions: [{ domain: 'evil.example', ip: '127.0.0.2' }] } });
+      assert(mock.score === 25, 'a mock answer for a non-safe domain must not exempt, got ' + mock.score);
+    });
+  }
+
+  // ── incompleteRunReasons: an unusable trace makes a score-0 run INCONCLUSIVE ──
+  {
+    const { incompleteRunReasons } = require('../../src/sandbox/index.js');
+    test('SANDBOX: an unusable gVisor trace (unknown format) is an incomplete run, with its reason as evidence', () => {
+      const r = incompleteRunReasons({ exit_code: 0, install_output: 'added 1 package', entrypoint_output: '' }, { telemetryUnusable: 'runsc trace log present but no syscall line recognized (unknown runsc strace format)' });
+      assert(r && /gVisor trace unusable/.test(r.reasons[0]) && /unknown runsc strace format/.test(r.evidence), 'got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: each incomplete-run reason has a stable code (one journal line per run is built from them)', () => {
+      const all = incompleteRunReasons({ exit_code: 1, install_output: 'npm error code E404', entrypoint_output: '[ENTRY_ERROR] MODULE_NOT_FOUND' }, { telemetryMissing: true });
+      assert(all && all.kinds.join(',') === 'install_failed,entry_failed,trace_missing', 'got ' + JSON.stringify(all && all.kinds));
+      const unusable = incompleteRunReasons({ exit_code: 0, entrypoint_output: '' }, { telemetryUnusable: 'x' });
+      assert(unusable && unusable.kinds.join(',') === 'trace_unusable', 'got ' + JSON.stringify(unusable && unusable.kinds));
+    });
+  }
+
+  // ── incompleteRunReasons: a score-0 run that observed nothing is not a CLEAN verdict ──
+  {
+    const { incompleteRunReasons } = require('../../src/sandbox/index.js');
+    const okReport = { exit_code: 0, install_output: 'added 1 package in 3s', entrypoint_output: '' };
+
+    test('SANDBOX: a run with no gVisor trace log is incomplete even when install and entry point succeeded', () => {
+      const r = incompleteRunReasons(okReport, { telemetryMissing: true });
+      assert(r && r.reasons.length === 1 && /no gVisor trace log/.test(r.reasons[0]),
+        'telemetryMissing must make the run incomplete, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: a usable run (install ok, entry point ok, telemetry present) is not incomplete', () => {
+      assert(incompleteRunReasons(okReport, { telemetryMissing: false }) === null, 'a usable run must return null');
+      assert(incompleteRunReasons(okReport) === null, 'no context = telemetry not known missing = null');
+    });
+
+    test('SANDBOX: npm >= 10 "npm error code E404" is recognized as an install failure', () => {
+      const r = incompleteRunReasons({ exit_code: 1, install_output: 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/nope', entrypoint_output: '' });
+      assert(r && /npm install failed \(exit 1\)/.test(r.reasons[0]), 'npm 10/11 output format must be recognized, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: any failed npm install (non-zero exit, e.g. EACCES or a failing install script) is incomplete', () => {
+      const eacces = incompleteRunReasons({ exit_code: 243, install_output: 'npm error code EACCES\nnpm error syscall mkdir', entrypoint_output: '' });
+      assert(eacces && /npm install failed \(exit 243\)/.test(eacces.reasons[0]), 'EACCES install must be incomplete, got ' + JSON.stringify(eacces));
+      const script = incompleteRunReasons({ exit_code: 1, install_output: 'npm error command sh -c node setup.mjs\nnpm error ENOSPC: no space left on device, write', entrypoint_output: '' });
+      assert(script && /npm install failed \(exit 1\)/.test(script.reasons[0]) && /ENOSPC/.test(script.evidence), 'a failing install script must be incomplete with its evidence, got ' + JSON.stringify(script));
+    });
+
+    test('SANDBOX: legacy "npm ERR! code ETARGET" is still recognized', () => {
+      const r = incompleteRunReasons({ exit_code: 1, install_output: 'npm ERR! code ETARGET\nnpm ERR! notarget No matching version', entrypoint_output: '' });
+      assert(r && /npm install failed/.test(r.reasons[0]), 'npm <= 9 format must still be recognized, got ' + JSON.stringify(r));
+    });
+
+    test('SANDBOX: entry point failure is reported with its evidence', () => {
+      const r = incompleteRunReasons({ exit_code: 0, install_output: 'added 1 package', entrypoint_output: "[ENTRY_ERROR] MODULE_NOT_FOUND: Cannot find module 'x'" });
+      assert(r && r.reasons[0] === 'Entry point require() failed' && /MODULE_NOT_FOUND/.test(r.evidence), 'entry error must be reported, got ' + JSON.stringify(r));
+    });
+  }
 
   // ── Docker args verification (env var detection) ──
 

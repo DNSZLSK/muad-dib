@@ -1,10 +1,22 @@
 #!/bin/sh
 PACKAGE="$1"
 MODE="${2:-permissive}"
+# Optional exact version to install. Without it `npm install <name>` resolves the
+# registry's `latest` tag at run time, which is not necessarily the version that was
+# scanned (a release outside the latest line, or a newer publish since the scan).
+VERSION="${3:-}"
 
 if [ -z "$PACKAGE" ]; then
-  echo "Usage: sandbox-runner.sh <package-name> [permissive|strict]" >&2
+  echo "Usage: sandbox-runner.sh <package-name> [permissive|strict] [version]" >&2
   exit 1
+fi
+INSTALL_SPEC="$PACKAGE"
+if [ -n "$VERSION" ]; then
+  # Defense in depth (the host validates too): the spec is interpolated into `sh -c`.
+  case "$VERSION" in
+    *[!0-9A-Za-z.+-]*) echo "[SANDBOX] invalid version: refusing to run" >&2; exit 1 ;;
+  esac
+  INSTALL_SPEC="$PACKAGE@$VERSION"
 fi
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -50,6 +62,9 @@ mkdir -p /home/sandboxuser/.config /home/sandboxuser/.local/share \
 chown -R sandboxuser:sandboxuser /home/sandboxuser/.config \
   /home/sandboxuser/.local /home/sandboxuser/Downloads \
   /home/sandboxuser/Documents /home/sandboxuser/.vscode
+# The home tmpfs is mounted owned by root (runc): npm could not create ~/.npm and every
+# install failed with EACCES before the package was fetched. A real home belongs to its user.
+chown sandboxuser:sandboxuser /home/sandboxuser
 
 # ══════════════════════════════════════════════════════════════
 # PHASE 0.6: Libfaketime setup (cross-process time acceleration)
@@ -100,7 +115,12 @@ fi
 # Safe domains (npm, GitHub, CDNs) are forwarded to the real upstream DNS.
 # Non-safe domains resolve to 127.0.0.2 where HTTP/HTTPS honeypots capture requests.
 # This allows the sandbox to observe network INTENT without real outbound traffic.
-UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')
+# The host passes --dns 127.0.0.1 (the root filesystem is read-only, so this script cannot
+# rewrite /etc/resolv.conf) and the real upstream in MUADDIB_UPSTREAM_DNS. Without it (older
+# host), fall back to the first non-loopback nameserver of resolv.conf.
+UPSTREAM_DNS="${MUADDIB_UPSTREAM_DNS:-}"
+unset MUADDIB_UPSTREAM_DNS
+[ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | grep -v '^127\.' | head -1)
 [ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS="8.8.8.8"
 
 # ── Temporarily disable libfaketime for mock network infrastructure ──
@@ -146,11 +166,25 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
   [ -f /tmp/mock-network-ready ] && break
   sleep 0.5
 done
+MOCK_STARTED=false
+MOCK_DNS_IN_PATH=false
 if [ -f /tmp/mock-network-ready ]; then
-  echo "nameserver 127.0.0.1" > /etc/resolv.conf
-  echo "[SANDBOX] Mock network active — DNS redirected to 127.0.0.1." >&2
+  MOCK_STARTED=true
+  # Already in place when the host passed --dns 127.0.0.1; otherwise try (fails on a
+  # read-only root filesystem) and report what the resolver really is.
+  grep -q '^nameserver 127\.0\.0\.1' /etc/resolv.conf 2>/dev/null || echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null
+  if [ "$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')" = "127.0.0.1" ]; then
+    MOCK_DNS_IN_PATH=true
+    echo "[SANDBOX] Mock network active - DNS goes through the mock (127.0.0.1)." >&2
+  else
+    echo "[SANDBOX] Mock network started but NOT in the DNS path (resolv.conf not writable, no --dns from host): queries go to the real resolver." >&2
+  fi
 else
-  echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  if [ "$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')" = "127.0.0.1" ]; then
+    echo "[SANDBOX] Mock network failed to start - the resolver points to it: no DNS in this run." >&2
+  else
+    echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  fi
   # Log why it failed (cert files missing? node crash?)
   [ ! -f /tmp/mock-ca.pem ] && echo "[SANDBOX] DIAG: mock-ca.pem missing (openssl failed)" >&2
   [ ! -f /tmp/mock-server-key.pem ] && echo "[SANDBOX] DIAG: mock-server-key.pem missing" >&2
@@ -187,7 +221,9 @@ if [ -z "$MUADDIB_GVISOR" ]; then
   OTHER_PID=$!
   sleep 1
 else
-  echo "[SANDBOX] gVisor mode — network captured at kernel level (--log-packets)." >&2
+  # The runtime records packets only when runsc runs with --log-packets; the host reports
+  # whether any runtime trace was actually found (sandbox/index.js).
+  echo "[SANDBOX] gVisor mode - network capture delegated to the runtime (runsc --log-packets), checked on host." >&2
 fi
 
 # ══════════════════════════════════════════════════════════════
@@ -257,27 +293,31 @@ echo "[SANDBOX] Honey environment deployed." >&2
 # tcpdump already captures install-phase network; preload targets runtime behavior.
 
 # ── 3. npm install with strace — as sandboxuser ──
-echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
+echo "[SANDBOX] Installing $INSTALL_SPEC as sandboxuser..." >&2
 cd /sandbox/install
 # Ensure sandboxuser owns the install directory
 chown sandboxuser:sandboxuser /sandbox/install
 # Run npm install as sandboxuser via su, wrapped in strace for syscall tracing.
+# --dangerously-allow-all-scripts: npm 12 blocks dependency install scripts that no
+# allowScripts policy covers (npm 11 only warns), and --ignore-scripts=false does not lift
+# that. Without it a sandbox image on npm 12 would never run a preinstall/postinstall.
+# npm 11 accepts the flag.
 # gVisor mode: no strace wrapper — gVisor traces all syscalls at the kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 elif [ "$MODE" = "strict" ]; then
   su sandboxuser -s /bin/sh -c "
     strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace.log \
-      npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+      npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 else
   touch /tmp/strace.log
   su sandboxuser -s /bin/sh -c "
-    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+    npm install \"$INSTALL_SPEC\" --ignore-scripts=false --dangerously-allow-all-scripts --fetch-timeout=120000 --cache /sandbox/install/.npm-cache > /tmp/install.log 2>&1
   "
 fi
 EXIT_CODE=$?
@@ -290,24 +330,30 @@ EXIT_CODE=$?
 export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/node_setup.js}"
 echo "[SANDBOX] Executing package entry point..." >&2
 
-if echo "$PACKAGE" | grep -q '^/'; then
-  # Local mode: $PACKAGE is already a path (e.g. /sandbox/local-pkg)
-  REQUIRE_PATH="$PACKAGE"
-else
-  # Remote mode: package installed in node_modules
-  REQUIRE_PATH="/sandbox/install/node_modules/$PACKAGE"
-fi
+# Local mode: $PACKAGE is a path (e.g. /sandbox/local-pkg), required as before.
+# Registry mode: required by NAME from /sandbox/install, so the package's "exports" map is
+# honoured (an absolute path to node_modules/<name> ignores "exports": packages that only
+# declare "exports", such as current chalk or typescript, were reported MODULE_NOT_FOUND and
+# never executed). An ESM-only package (no require condition, or top-level await) is
+# loaded with import(). The spec goes through the environment, never into the JS source.
+ENTRY_SPEC_VALUE="$PACKAGE"
+ENTRY_JS="const s=process.env.ENTRY_SPEC;delete process.env.ENTRY_SPEC;const fail=(e)=>{console.error('[ENTRY_ERROR] '+((e&&e.code)||'UNKNOWN')+': '+(e&&e.message));process.exitCode=42;};try{require(s);}catch(e){if(e&&['ERR_REQUIRE_ESM','ERR_REQUIRE_ASYNC_MODULE','ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(e.code)){import(s).catch(fail);}else{fail(e);}}"
+
+# libfaketime (runs 2/3) also accelerates `timeout`: its 30 s expired in about 30 ms and
+# node was killed before loading the package, so those runs reported CLEAN without having
+# executed anything. timeout (and strace) run without the preload; only node gets it back.
+ENTRY_LD_PRELOAD="${LD_PRELOAD:-}"
 
 # gVisor mode: no strace wrapper — gVisor traces at kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   su sandboxuser -s /bin/sh -c "
-    timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
+    cd /sandbox/install && LD_PRELOAD= ENTRY_SPEC='$ENTRY_SPEC_VALUE' timeout 30 env LD_PRELOAD='$ENTRY_LD_PRELOAD' node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 else
   su sandboxuser -s /bin/sh -c "
-    strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+    cd /sandbox/install && LD_PRELOAD= ENTRY_SPEC='$ENTRY_SPEC_VALUE' strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace-entrypoint.log \
-      timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
+      timeout 30 env LD_PRELOAD='$ENTRY_LD_PRELOAD' node -e \"$ENTRY_JS\" > /tmp/entrypoint.log 2>&1
   " || true
 
   # Merge entrypoint strace into main strace log for unified analysis
@@ -347,7 +393,7 @@ comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | g
 # gVisor mode: strace parsing happens on the host via gvisor-parser.js.
 # Create empty files so the JSON report generation below works with empty arrays.
 if [ -n "$MUADDIB_GVISOR" ]; then
-  echo "[SANDBOX] gVisor mode — strace parsed on host." >&2
+  echo "[SANDBOX] gVisor mode - syscall trace delegated to the runtime (runsc --strace), read and checked on host." >&2
   touch /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
     /tmp/connections.txt /tmp/suspicious-cmds.txt \
     /tmp/dns-queries.txt /tmp/dns-resolutions.txt \
@@ -471,6 +517,13 @@ if [ -f /tmp/mock-dns.log ]; then
   echo "[SANDBOX] Parsing mock DNS log..." >&2
   jq -r 'select(.safe == false) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u >> /tmp/dns-queries.txt
   jq -r 'select(.safe == false and .mock_ip != null) | "\(.domain)\t\(.mock_ip)"' /tmp/mock-dns.log 2>/dev/null >> /tmp/dns-resolutions.txt
+  # Safe domains (registry, code hosting) are forwarded to the real resolver and were
+  # dropped from the report: a download from a code-hosting release or a call to its
+  # API left no trace. Kept in a separate field (not scored) so they stay visible.
+  jq -r 'select(.safe == true) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u > /tmp/safe-dns-queries.txt
+  # IPv4 answers the upstream resolver gave for those safe names: the host does not count
+  # a connection to one of them (a registry download) as a suspicious connection.
+  jq -r 'select(.safe == true and (.answers | type) == "array") | .domain as $d | .answers[] | "\($d)\t\(.)"' /tmp/mock-dns.log 2>/dev/null | sort -u > /tmp/safe-dns-resolutions.txt
 fi
 if [ -f /tmp/mock-http.log ]; then
   echo "[SANDBOX] Parsing mock HTTP log..." >&2
@@ -492,7 +545,7 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
   /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
   /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
-  /tmp/preload.log
+  /tmp/preload.log /tmp/safe-dns-queries.txt
 
 # ── Pre-bake all data as JSON files ──
 # Previous approach passed all data via --arg/--argjson on the jq CLI.
@@ -509,6 +562,7 @@ jq_to_file() {
 # Simple line arrays
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-created.txt /tmp/rpt-fs-created.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-deleted.txt /tmp/rpt-fs-deleted.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/safe-dns-queries.txt /tmp/rpt-safe-dns.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/dns-queries.txt /tmp/rpt-dns.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-read.txt /tmp/rpt-sens-read.json
 jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-written.txt /tmp/rpt-sens-written.json
@@ -526,6 +580,10 @@ jq_to_file 'split("\n") | map(select(length > 0)) | map(
 jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {domain: (.[0] // ""), ip: (.[1] // "")}
 )' /tmp/dns-resolutions.txt /tmp/rpt-dns-res.json
+
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: (.[0] // ""), ip: (.[1] // "")}
+)' /tmp/safe-dns-resolutions.txt /tmp/rpt-safe-dns-res.json
 
 jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {method: (.[0] // ""), host: (.[1] // ""), path: (.[2] // "")}
@@ -556,14 +614,18 @@ REPORT_JSON=$(jq -n \
   --arg mode "$MODE" \
   --argjson duration "${DURATION_MS:-0}" \
   --argjson exit_code "${EXIT_CODE:-1}" \
+  --argjson mock_started "${MOCK_STARTED:-false}" \
+  --argjson mock_dns "${MOCK_DNS_IN_PATH:-false}" \
   --slurpfile fs_created /tmp/rpt-fs-created.json \
   --slurpfile fs_deleted /tmp/rpt-fs-deleted.json \
   --slurpfile dns /tmp/rpt-dns.json \
+  --slurpfile safe_dns /tmp/rpt-safe-dns.json \
   --slurpfile connections /tmp/rpt-conns.json \
   --slurpfile processes /tmp/rpt-procs.json \
   --slurpfile sensitive_read /tmp/rpt-sens-read.json \
   --slurpfile sensitive_written /tmp/rpt-sens-written.json \
   --slurpfile dns_resolutions /tmp/rpt-dns-res.json \
+  --slurpfile safe_dns_resolutions /tmp/rpt-safe-dns-res.json \
   --slurpfile http_requests /tmp/rpt-http-req.json \
   --slurpfile http_bodies /tmp/rpt-http-bodies.json \
   --slurpfile tls_connections /tmp/rpt-tls.json \
@@ -583,7 +645,9 @@ REPORT_JSON=$(jq -n \
     },
     network: {
       dns_queries: $dns[0],
+      safe_dns_queries: $safe_dns[0],
       dns_resolutions: $dns_resolutions[0],
+      safe_dns_resolutions: $safe_dns_resolutions[0],
       http_connections: $connections[0],
       http_requests: $http_requests[0],
       http_bodies: $http_bodies[0],
@@ -600,7 +664,8 @@ REPORT_JSON=$(jq -n \
     install_output: $install_output[0],
     entrypoint_output: $entrypoint_output[0],
     preload_log: $preload_log[0],
-    exit_code: $exit_code
+    exit_code: $exit_code,
+    mock_network: { started: $mock_started, dns_in_path: $mock_dns }
   }' 2>/tmp/jq-final-error.log)
 
 echo "---MUADDIB-REPORT-START---"
@@ -614,6 +679,6 @@ else
     [ ! -s "$_f" ] && echo "[SANDBOX] DIAG: $_f empty/missing" >&2
   done
   # Fallback minimal JSON so the host parser doesn't crash
-  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s}\n' \
-    "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}"
+  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"safe_dns_queries":[],"dns_resolutions":[],"safe_dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s,"mock_network":{"started":%s,"dns_in_path":%s}}\n' \
+    "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}" "${MOCK_STARTED:-false}" "${MOCK_DNS_IN_PATH:-false}"
 fi

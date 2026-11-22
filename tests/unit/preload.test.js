@@ -212,6 +212,21 @@ function runPreloadTests() {
     return { stdout, log };
   }
 
+  test('PRELOAD: one file write is logged once (the logger does not log its own writes)', () => {
+    const os = require('os');
+    const target = path.join(os.tmpdir(), `muaddib-preload-write-${process.pid}.txt`);
+    try {
+      const { log } = runWithPreload(`require('fs').writeFileSync(${JSON.stringify(target)}, 'x')`);
+      const lines = log.split('\n').filter(Boolean);
+      const writes = lines.filter(l => l.includes('FS_WRITE'));
+      const forTarget = writes.filter(l => l.includes(path.basename(target)));
+      assert(forTarget.length === 1, `expected exactly 1 FS_WRITE line for the target, got ${forTarget.length}`);
+      assert(writes.length === 1, `expected 1 FS_WRITE line in total, got ${writes.length} (log of ${lines.length} lines)`);
+    } finally {
+      try { fs.rmSync(target, { force: true }); } catch { /* ignore */ }
+    }
+  });
+
   test('PRELOAD: preload.js exists and is syntactically valid JS', () => {
     assert(fs.existsSync(PRELOAD_PATH), 'docker/preload.js should exist');
     new vm.Script(fs.readFileSync(PRELOAD_PATH, 'utf8')); // throws on syntax error

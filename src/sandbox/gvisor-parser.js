@@ -22,20 +22,40 @@
 const fs = require('fs');
 const path = require('path');
 
+// Where runsc writes its trace logs (--debug-log=<dir>/%ID%/) and where the host reads them.
+// Not under /tmp: the monitor runs with PrivateTmp=true, so a host /tmp/runsc written by the
+// Docker daemon is invisible to it. MUADDIB_GVISOR_LOG_DIR overrides; install-gvisor.sh and
+// daemon.json must use the same directory.
+const DEFAULT_GVISOR_LOG_DIR = '/var/log/runsc';
+function gvisorLogDir() {
+  return process.env.MUADDIB_GVISOR_LOG_DIR || DEFAULT_GVISOR_LOG_DIR;
+}
+
 // ══════════════════════════════════════════════════════════════
 // gVisor strace log parser
 //
-// gVisor's --strace flag logs syscalls at the kernel level in its
-// debug log files. This parser extracts security-relevant data
-// (file access, network connections, process execution) and returns
-// the SAME structure as sandbox-runner.sh's strace/tcpdump parsing,
-// so the downstream scoreFindings() analyzer needs no changes.
+// runsc --strace writes one line per syscall enter (E) and exit (X) in the boot log.
+// Format, taken from real runsc release-20260323.0 traces (tests/samples/gvisor/) and
+// pkg/sentry/strace + pkg/sentry/kernel/task_log.go of that release:
 //
-// gVisor strace format:
-//   D0331 12:34:56.789012  1 strace.go:587] [  PID] process E syscall(args) = ret (dur)
+//   I1121 23:46:30.140447       1 strace.go:605] [  11:  11] npm install exp X connect(
+//     0x15 socket:[24], 0x7efd... {Family: AF_INET, Addr: 104.16.10.34, Port: 443}, 0x10)
+//     = 0 (0x0) errno=115 (operation now in progress) (77.1µs)
 //
-// Or bare (without Go log prefix):
-//   [  PID] process E syscall(args) = ret (dur)
+// - prefix "[ tgid: tid]" (nested PID namespaces: "[ root(ns): root(ns)]");
+// - then the task name (comm, at most 15 bytes, set by the process itself: it can hold
+//   spaces, e.g. "npm install exp", or text that imitates the rest of the line);
+// - paths are NOT quoted ("AT_FDCWD /cwd, 0x7f.. /etc/passwd, O_RDONLY|O_CLOEXEC, 0o0");
+// - a failed syscall still prints "= 0 (0x0)" followed by "errno=N (text)": success is
+//   "no errno", never "return value >= 0".
+//
+// The whole container is traced, runner included (su reads /etc/shadow, the runner
+// writes the honeytokens, npm reads ~/.npmrc). Only the processes the runner starts for
+// the package are analyzed: the subtrees whose root is a shell exec'd by a child of `su`
+// (`su sandboxuser -s /bin/sh -c "npm install ..."` and the entry point), found through
+// the clone/clone3/fork/vfork exits. runsc must trace those syscalls
+// (--strace-syscalls=openat,open,connect,execve,execveat,clone,clone3,fork,vfork);
+// without them the scope is unknown and the run is reported as unusable, not clean.
 // ══════════════════════════════════════════════════════════════
 
 const SENSITIVE_PATTERN = /\.npmrc|\.ssh\/|\.aws\/|\.env(?:$|[^a-zA-Z])|\/etc\/passwd|\/etc\/shadow|\.gitconfig|\.bash_history/;
@@ -43,156 +63,350 @@ const SENSITIVE_PATTERN = /\.npmrc|\.ssh\/|\.aws\/|\.env(?:$|[^a-zA-Z])|\/etc\/p
 // Processes that are sandbox infrastructure — not spawned by the package
 const SAFE_PROCESSES = new Set(['node', 'npm', 'npx', 'sh', 'git']);
 
+const TRACED_SYSCALLS = new Set(['openat', 'open', 'connect', 'execve', 'execveat', 'clone', 'clone3', 'fork', 'vfork']);
+const CLONE_SYSCALLS = new Set(['clone', 'clone3', 'fork', 'vfork']);
+const SHELLS = new Set(['sh', 'ash', 'dash', 'bash']);
+// The comm is at most 15 bytes (TASK_COMM_LEN - 1), so the real " E|X syscall(" marker
+// starts at most 16 characters after the "] " that closes the task prefix.
+const MAX_COMM = 15;
+// Paths are at most PATH_MAX (4096) bytes: an exec path cannot extend past this.
+const MAX_PATH_SPAN = 4200;
+// Exec split candidates tried before failing closed (a real line has exactly one).
+const MAX_EXEC_SPLITS = 8;
+const MARKER_RE = / ([EX]) ([a-z0-9_]+)\(/g;
+
+// Every line holds text the sandboxed package chose (paths, argv, task name) and is parsed
+// synchronously on the monitor's main thread: no backtracking regex, linear scans only.
+
+/** Digits of one prefix field ("  11" or "   1(  7)" in nested PID namespaces). */
+function prefixNumber(field) {
+  const f = field.trim();
+  const paren = f.indexOf('(');
+  const n = (paren >= 0 ? f.slice(0, paren) : f).trim();
+  return /^\d{1,10}$/.test(n) ? parseInt(n, 10) : null;
+}
+
+/** End index (exclusive) of a Go %q string list "[...]" starting at s[i] === '[', or -1. */
+function goListEnd(s, i) {
+  if (s[i] !== '[') return -1;
+  i++;
+  if (s[i] === ']') return i + 1;
+  for (;;) {
+    if (s[i] !== '"') return -1;
+    i++;
+    while (i < s.length && s[i] !== '"') i += s[i] === '\\' ? 2 : 1;
+    if (i >= s.length) return -1;
+    i++; // closing quote
+    if (s[i] === ']') return i + 1;
+    if (s[i] !== ',' || s[i + 1] !== ' ') return -1;
+    i += 2;
+  }
+}
+
+/** End index of "0x<hex>" at s[i], or -1. */
+function hexEnd(s, i) {
+  if (s[i] !== '0' || s[i + 1] !== 'x') return -1;
+  let j = i + 2;
+  while (j < s.length && /[0-9a-f]/.test(s[j])) j++;
+  return j > i + 2 ? j : -1;
+}
+
 // ── Line-level parsers ──
 
 /**
- * Parse a single gVisor strace line.
- * Handles both Go-log-prefixed and bare formats.
- *
- * @param {string} line - Raw log line
- * @returns {object|null} Parsed syscall info or null if not a strace line
+ * Parse one runsc strace line.
+ * @param {string} line
+ * @returns {null|{tgid:number, tid:number, comm:string, phase:'E'|'X', syscall:string,
+ *   args:string, ret:number|null, errno:number|null}}
  */
 function parseStraceLine(line) {
-  // Strip Go log prefix if present: everything up to `] ` before the `[PID]` block
-  const bracketIdx = line.indexOf('] [');
-  const content = bracketIdx >= 0 ? line.substring(bracketIdx + 2).trim() : line.trim();
-
-  // Match: [PID] process E/X syscall(args) = return (duration)
-  const match = content.match(
-    /^\[\s*(\d+)\]\s+(\S+)\s+[EX]\s+(\w+)\((.+)\)\s*=\s*(.+?)(?:\s+\([\d.]+[µm]?s\))?$/
-  );
-  if (!match) return null;
-
-  return {
-    pid: parseInt(match[1], 10),
-    process: match[2],
-    syscall: match[3],
-    args: match[4],
-    returnValue: match[5].trim()
-  };
+  // Task prefix "[ tgid: tid] " right after the glog header "...strace.go:NNN] ".
+  const header = line.indexOf('] [');
+  const start = header >= 0 ? header + 2 : (line[0] === '[' ? 0 : -1);
+  if (start < 0) return null;
+  const close = line.indexOf('] ', start);
+  if (close < 0 || close - start > 48) return null;
+  const fields = line.slice(start + 1, close).split(':');
+  if (fields.length !== 2) return null;
+  const tgid = prefixNumber(fields[0]), tid = prefixNumber(fields[1]);
+  if (tgid === null || tid === null) return null;
+  const rest = line.slice(close + 2);
+  // Last marker that still fits after a <= 15-byte comm: a comm that imitates
+  // " X openat(" sits before the real marker, never after it.
+  const head = rest.slice(0, MAX_COMM + 32);
+  let marker = null;
+  MARKER_RE.lastIndex = 0;
+  let m;
+  while ((m = MARKER_RE.exec(head)) !== null) {
+    if (m.index > MAX_COMM) break;
+    if (m.index >= 1 && TRACED_SYSCALLS.has(m[2])) marker = { index: m.index, phase: m[1], syscall: m[2], end: m.index + m[0].length };
+    MARKER_RE.lastIndex = m.index + 1;
+  }
+  if (!marker) return null;
+  let body = rest.slice(marker.end);
+  let ret = null, errno = null;
+  if (marker.phase === 'X') {
+    // "... ) = <ret> (0x<ret>)[ errno=<n> (<text>)] (<duration>)" is the end of the line;
+    // the args before it can contain anything, so it is read from the last ") = ".
+    const k = body.lastIndexOf(') = ');
+    if (k < 0) return null;
+    let t = body.slice(k + 4);
+    const r = /^(-?\d{1,20}) \(0x[0-9a-f]{1,16}\)/.exec(t);
+    if (!r) return null;
+    ret = parseInt(r[1], 10);
+    t = t.slice(r[0].length);
+    if (t.startsWith(' errno=')) {
+      const e = /^ errno=(\d{1,5}) \(/.exec(t);
+      const closeText = e ? t.indexOf(')', e[0].length) : -1;
+      if (closeText < 0) return null;
+      errno = parseInt(e[1], 10);
+      t = t.slice(closeText + 1);
+    }
+    if (!/^ \([^)]{0,32}\)$/.test(t)) return null;
+    body = body.slice(0, k);
+  } else {
+    if (!body.endsWith(')')) return null;
+    body = body.slice(0, -1);
+  }
+  return { tgid, tid, comm: rest.slice(0, marker.index), phase: marker.phase, syscall: marker.syscall, args: body, ret, errno };
 }
 
 /**
- * Extract file path and flags from openat/open args.
- * gVisor format: AT_FDCWD, "/path", O_RDONLY|O_CLOEXEC
- *
- * @param {string} args - Syscall arguments string
- * @returns {object|null} { path, flags } or null
+ * openat/open args: "<dirfd>, 0x<addr> <path>, <flags>, <mode>" (open has no dirfd).
+ * The path is unquoted and may contain ", ": flags and mode are peeled off the right,
+ * the path is what follows the last "0x<addr> " pointer. For a relative path the
+ * directory name of the fd is prepended, so openat(<fd of ~/.ssh>, "id_rsa") is
+ * still seen as ~/.ssh/id_rsa.
+ * @returns {null|{path:string, flags:string}}
  */
-function extractOpenatPath(args) {
-  // Comma-separated: AT_FDCWD, "/path/to/file", O_RDONLY|O_CLOEXEC, 0o0
-  const match = args.match(/"([^"]+)"[\s,]+([A-Z_|]+)/);
-  if (match) return { path: match[1], flags: match[2] };
-
-  // Space-separated (some gVisor versions): AT_FDCWD "/path" O_RDONLY
-  const matchSpace = args.match(/"([^"]+)"\s+([A-Z_|]+)/);
-  if (matchSpace) return { path: matchSpace[1], flags: matchSpace[2] };
-
-  return null;
+function extractOpenatPath(args, syscall = 'openat') {
+  const modeCut = args.lastIndexOf(', ');
+  if (modeCut < 0) return null;
+  const head = args.slice(0, modeCut);
+  const flagsCut = head.lastIndexOf(', ');
+  if (flagsCut < 0) return null;
+  const flags = head.slice(flagsCut + 2);
+  if (!flags.split('|').every(tok => /^O_[A-Z_]{1,24}$/.test(tok) || /^0x[0-9a-f]{1,16}$/.test(tok))) return null;
+  const fdAndPath = head.slice(0, flagsCut);
+  const ptr = /(?:^|, )0x[0-9a-f]+ /g;
+  let last = null, m;
+  while ((m = ptr.exec(fdAndPath)) !== null) {
+    if (syscall === 'open' || m.index > 0) last = m;
+    ptr.lastIndex = m.index + 1;
+  }
+  if (!last) return null;
+  let p = fdAndPath.slice(last.index + last[0].length);
+  if (!p) return null;
+  if (!p.startsWith('/') && syscall === 'openat') {
+    const fd = fdAndPath.slice(0, last.index);
+    const sp = fd.indexOf(' ');
+    const dir = sp > 0 && (fd.slice(0, sp) === 'AT_FDCWD' || hexEnd(fd, 0) === sp) ? fd.slice(sp + 1) : '';
+    if (dir.startsWith('/')) p = dir.replace(/\/$/, '') + '/' + p;
+  }
+  return { path: p, flags };
 }
 
 /**
- * Extract IP and port from connect() args.
- * gVisor format: {Family: AF_INET, Addr: 1.2.3.4, Port: 443}
- *
- * @param {string} args - Syscall arguments string
- * @returns {object|null} { ip, port } or null
+ * connect args: "<fd>, 0x<addr> {Family: AF_INET, Addr: 1.2.3.4, Port: 443}, 0x10".
+ * IPv4 only (the sandbox bridge has no IPv6 route).
+ * @returns {null|{ip:string, port:number}}
  */
 function extractConnectInfo(args) {
-  const match = args.match(/\{Family:\s*AF_INET,\s*Addr:\s*([\d.]+),\s*Port:\s*(\d+)\}/);
+  const match = args.match(/\{Family: AF_INET, Addr: (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}), Port: (\d{1,5})\}/);
   if (!match) return null;
   return { ip: match[1], port: parseInt(match[2], 10) };
 }
 
 /**
- * Extract command path from execve() args.
- * gVisor format: execve("/usr/bin/curl", ["curl", ...], ...)
- *
- * @param {string} args - Syscall arguments string
- * @returns {string|null} Command path or null
+ * execve args: "0x<addr> <path>, 0x<addr> ["argv0", ...], 0x<addr> ["ENV=..", ...]"
+ * (execveat: "<fd>, 0x<addr> <path>, ...argv, envp, 0x<flags>"). The path is unquoted
+ * and may itself contain ", 0x1 [": the split kept is the one whose remainder parses as
+ * the two Go-quoted vectors, so a binary named "/tmp/node, 0x1 [x" is not read as node.
+ * At most MAX_EXEC_SPLITS candidates are checked; past that the longest candidate path is
+ * kept (fail closed: it does not read as a known program).
+ * @returns {null|{path:string, argv:string[]}}
  */
-function extractExecveCommand(args) {
-  const match = args.match(/^"([^"]+)"/);
-  return match ? match[1] : null;
+function extractExecveCommand(args, syscall = 'execve') {
+  let s = args;
+  if (syscall === 'execveat') {
+    const cut = s.indexOf(', 0x');
+    if (cut < 0) return null;
+    s = s.slice(cut + 2);
+  }
+  const lead = hexEnd(s, 0);
+  if (lead < 0 || s[lead] !== ' ') return null;
+  s = s.slice(lead + 1);
+  const sep = /, 0x[0-9a-f]+ \[/g;
+  let m, tries = 0, lastCandidate = -1;
+  while ((m = sep.exec(s)) !== null && m.index <= MAX_PATH_SPAN) {
+    lastCandidate = m.index;
+    if (tries++ < MAX_EXEC_SPLITS) {
+      const argvStart = m.index + m[0].length - 1;
+      const argvEnd = goListEnd(s, argvStart);
+      if (argvEnd > 0 && s.startsWith(', 0x', argvEnd)) {
+        const envHex = hexEnd(s, argvEnd + 2);
+        const envEnd = envHex > 0 && s[envHex] === ' ' ? goListEnd(s, envHex + 1) : -1;
+        const flagsEnd = envEnd > 0 && s.startsWith(', ', envEnd) ? hexEnd(s, envEnd + 2) : envEnd;
+        if (envEnd > 0 && flagsEnd === s.length) {
+          let argv;
+          try { argv = JSON.parse(s.slice(argvStart, argvEnd)); } catch { argv = []; }
+          return { path: s.slice(0, m.index), argv };
+        }
+      }
+    }
+    sep.lastIndex = m.index + 1;
+  }
+  return lastCandidate >= 0 ? { path: s.slice(0, lastCandidate), argv: [] } : null;
 }
 
 // ── Main parser ──
 
+function emptySupplement() {
+  return {
+    sensitive_files: { read: [], written: [] },
+    network: { http_connections: [] },
+    processes: { spawned: [] }
+  };
+}
+
 /**
- * Parse gVisor strace log content and extract security-relevant findings.
- * Returns the SAME data structure as sandbox-runner.sh's strace parsing
- * so scoreFindings() works identically.
- *
- * @param {string} content - Raw gVisor strace log content
- * @returns {object} { sensitive_files: {read, written}, network: {http_connections}, processes: {spawned} }
+ * Parse one runsc boot log and extract what the package's processes did.
+ * Returns the report supplement consumed by scoreFindings() plus:
+ *   straceLines: syscall lines recognized (0 on a non-empty log = unknown format);
+ *   scoped: true when at least one package subtree (child of su) was found.
  */
 function parseGvisorStrace(content) {
-  const sensitiveReads = new Set();
-  const sensitiveWrites = new Set();
-  const connections = new Map();  // dedup by ip:port
-  const processes = new Map();    // dedup by pid:command
+  const out = emptySupplement();
+  const events = [];
+  const children = new Map();   // tgid -> [{ child, index }] (successful clone/fork exits)
+  const cloneIndex = new Map(); // child tgid -> index of the clone exit that created it
+  const parentOf = new Map();   // child tgid -> parent tgid
+  const execs = new Map();      // tgid -> [{ index, path, argv }] (execs that took effect, in order)
+  const lastExecOfTid = new Map(); // tid -> exec record, while that tid's last event is an exec
+  const superseded = new Set(); // event indexes of exec attempts that did not take effect
 
-  const lines = content.split('\n');
-
-  for (const line of lines) {
-    const parsed = parseStraceLine(line);
-    if (!parsed) continue;
-
-    // Only process successful syscalls (return >= 0)
-    if (parsed.returnValue.startsWith('-')) continue;
-
-    switch (parsed.syscall) {
-      case 'openat':
-      case 'open': {
-        const info = extractOpenatPath(parsed.args);
-        if (!info || !SENSITIVE_PATTERN.test(info.path)) break;
-
-        if (/O_WRONLY|O_RDWR|O_CREAT/.test(info.flags)) {
-          sensitiveWrites.add(info.path);
-        } else if (/O_RDONLY/.test(info.flags)) {
-          sensitiveReads.add(info.path);
-        }
-        break;
+  // Pass 1: syscall exits (they carry the result), clones and execs.
+  for (const line of content.split('\n')) {
+    if (line.indexOf(' X ') < 0) continue;
+    const ev = parseStraceLine(line);
+    if (!ev || ev.phase !== 'X') continue;
+    const index = events.length;
+    events.push(ev);
+    const isExec = ev.syscall === 'execve' || ev.syscall === 'execveat';
+    // runsc release-20260323.0 prints a FAILED execve as "= 0 (0x0)" with no errno (real
+    // trace: env's PATH search /usr/local/sbin/node ... /usr/bin/node, four "= 0" exits).
+    // A thread whose execve worked runs the new image before its next exec; consecutive
+    // execs of one thread are attempts, and only the last one can have taken effect.
+    const pending = lastExecOfTid.get(ev.tid);
+    if (pending && isExec) {
+      superseded.add(pending.index);
+      const list = execs.get(pending.tgid);
+      if (list && list[list.length - 1] === pending) list.pop();
+    }
+    lastExecOfTid.delete(ev.tid);
+    if (CLONE_SYSCALLS.has(ev.syscall)) {
+      if (ev.errno === null && ev.ret > 0) {
+        if (!children.has(ev.tgid)) children.set(ev.tgid, []);
+        children.get(ev.tgid).push({ child: ev.ret, index });
+        if (!parentOf.has(ev.ret)) { parentOf.set(ev.ret, ev.tgid); cloneIndex.set(ev.ret, index); }
       }
-
-      case 'connect': {
-        const conn = extractConnectInfo(parsed.args);
-        if (!conn) break;
-        if (conn.ip.startsWith('127.')) break;  // skip loopback
-        if (conn.port === 65535) break;          // skip probe port
-        const key = `${conn.ip}:${conn.port}`;
-        if (!connections.has(key)) {
-          connections.set(key, { host: conn.ip, port: conn.port, protocol: 'TCP' });
-        }
-        break;
-      }
-
-      case 'execve': {
-        const cmd = extractExecveCommand(parsed.args);
-        if (!cmd) break;
-        const basename = path.basename(cmd);
-        if (SAFE_PROCESSES.has(basename)) break;
-        const key = `${parsed.pid}:${cmd}`;
-        if (!processes.has(key)) {
-          processes.set(key, { command: cmd, pid: parsed.pid });
-        }
-        break;
+    } else if ((ev.syscall === 'execve' || ev.syscall === 'execveat') && ev.errno === null) {
+      const cmd = extractExecveCommand(ev.args, ev.syscall);
+      if (cmd) {
+        if (!execs.has(ev.tgid)) execs.set(ev.tgid, []);
+        const rec = { index, tgid: ev.tgid, path: cmd.path, argv: cmd.argv };
+        execs.get(ev.tgid).push(rec);
+        lastExecOfTid.set(ev.tid, rec);
       }
     }
   }
 
-  return {
-    sensitive_files: {
-      read: [...sensitiveReads],
-      written: [...sensitiveWrites]
-    },
-    network: {
-      http_connections: [...connections.values()]
-    },
-    processes: {
-      spawned: [...processes.values()]
-    }
+  // Program image of a process just before event `index`: its last exec before it, else
+  // the parent's image when it was cloned (independent of the order lines were written).
+  const imageAt = (tgid, index, depth = 0) => {
+    const list = execs.get(tgid) || [];
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].index < index) return path.basename(list[i].path);
+    if (depth > 64 || !parentOf.has(tgid)) return null;
+    return imageAt(parentOf.get(tgid), cloneIndex.get(tgid), depth + 1);
   };
+
+  // Roots: a shell exec'd by a process whose image is su - the su child (util-linux su
+  // forks) or su itself (busybox su, in the sandbox image, execs the shell in place).
+  const rootStart = new Map();
+  for (const [t, list] of execs) {
+    for (const e of list) {
+      if (SHELLS.has(path.basename(e.path)) && imageAt(t, e.index) === 'su') {
+        if (!rootStart.has(t) || e.index < rootStart.get(t)) rootStart.set(t, e.index);
+      }
+    }
+  }
+
+  // Package subtrees: the root from its shell exec, and every process it then clones.
+  const inScope = new Map(); // tgid -> first event index that belongs to the package
+  for (const [root, start] of rootStart) {
+    const queue = [[root, start]];
+    while (queue.length) {
+      const [t, from] = queue.shift();
+      if (inScope.has(t) && inScope.get(t) <= from) continue;
+      inScope.set(t, from);
+      for (const c of children.get(t) || []) if (c.index >= from) queue.push([c.child, from]);
+    }
+  }
+
+  // The npm CLI started by a root shell reads ~/.npmrc and ~/.gitconfig (both honeytokens;
+  // .gitconfig seen in a production trace, npm 11) on every install: those reads are npm's
+  // own config load, not the package. Only that npm is exempt (the root
+  // itself when the shell execs npm in place, or a direct child of the root); an npm
+  // started by an install script (`npm config get ...` reads the token for the script)
+  // is not.
+  const isNpm = (e) => path.basename(e.path) === 'npm' || /(?:^|\/)npm(?:-cli\.js)?$/.test(e.argv[1] || '');
+  const rootNpm = new Set();
+  for (const [t, list] of execs) {
+    const fromRoot = rootStart.has(t) || rootStart.has(parentOf.get(t));
+    if (fromRoot && list.some(e => (!rootStart.has(t) || e.index > rootStart.get(t)) && isNpm(e))) rootNpm.add(t);
+  }
+
+  const reads = new Set(), writes = new Set(), conns = new Map(), procs = new Map();
+  events.forEach((ev, index) => {
+    if (!inScope.has(ev.tgid) || index < inScope.get(ev.tgid)) return;
+    if (ev.errno !== null) return; // failed: no access happened (EINPROGRESS handled below)
+    switch (ev.syscall) {
+      case 'openat':
+      case 'open': {
+        const info = extractOpenatPath(ev.args, ev.syscall);
+        if (!info || !SENSITIVE_PATTERN.test(info.path)) break;
+        if (/O_WRONLY|O_RDWR|O_CREAT/.test(info.flags)) writes.add(info.path);
+        else if (!(rootNpm.has(ev.tgid) && /(?:^|\/)(?:\.?npmrc|\.gitconfig)$/.test(info.path))) reads.add(info.path);
+        break;
+      }
+      case 'execve':
+      case 'execveat': {
+        if (superseded.has(index)) break; // exec attempt that did not take effect
+        const cmd = extractExecveCommand(ev.args, ev.syscall);
+        if (!cmd || SAFE_PROCESSES.has(path.basename(cmd.path))) break;
+        const key = `${ev.tgid}:${cmd.path}`;
+        if (!procs.has(key)) procs.set(key, { command: cmd.path, pid: ev.tgid });
+        break;
+      }
+    }
+  });
+  // connect: a non-blocking connect returns errno=115 (EINPROGRESS) - that IS the attempt.
+  events.forEach((ev, index) => {
+    if (ev.syscall !== 'connect' || !inScope.has(ev.tgid) || index < inScope.get(ev.tgid)) return;
+    if (ev.errno !== null && ev.errno !== 115) return;
+    const conn = extractConnectInfo(ev.args);
+    if (!conn || conn.ip.startsWith('127.') || conn.port === 65535) return;
+    const key = `${conn.ip}:${conn.port}`;
+    if (!conns.has(key)) conns.set(key, { host: conn.ip, port: conn.port, protocol: 'TCP' });
+  });
+
+  out.sensitive_files.read = [...reads];
+  out.sensitive_files.written = [...writes];
+  out.network.http_connections = [...conns.values()];
+  out.processes.spawned = [...procs.values()];
+  out.straceLines = events.length;
+  out.scoped = rootStart.size > 0;
+  return out;
 }
 
 // ── Log discovery ──
@@ -205,11 +419,11 @@ function parseGvisorStrace(content) {
  *   3. Files in logDir containing the container ID
  *
  * @param {string} containerId - Docker container ID (full 64-char or truncated)
- * @param {string} logDir - gVisor debug-log base directory (default: /tmp/runsc)
+ * @param {string} logDir - gVisor debug-log base directory (default: DEFAULT_GVISOR_LOG_DIR)
  * @returns {string[]} Matching log file paths
  */
 function findGvisorLogs(containerId, logDir) {
-  logDir = logDir || '/tmp/runsc';
+  logDir = logDir || DEFAULT_GVISOR_LOG_DIR;
   const logFiles = [];
 
   if (!fs.existsSync(logDir)) return logFiles;
@@ -267,13 +481,11 @@ function collectLogFiles(dir) {
 function parseGvisorLog(logPath) {
   try {
     const content = fs.readFileSync(logPath, 'utf8');
-    return parseGvisorStrace(content);
+    const result = parseGvisorStrace(content);
+    result.nonEmpty = content.trim().length > 0;
+    return result;
   } catch {
-    return {
-      sensitive_files: { read: [], written: [] },
-      network: { http_connections: [] },
-      processes: { spawned: [] }
-    };
+    return Object.assign(emptySupplement(), { straceLines: 0, scoped: false, nonEmpty: false });
   }
 }
 
@@ -285,11 +497,13 @@ function parseGvisorLog(logPath) {
  * @returns {object} Aggregated report supplement
  */
 function parseGvisorLogs(containerId, logDir) {
-  const emptyResult = {
-    sensitive_files: { read: [], written: [] },
-    network: { http_connections: [] },
-    processes: { spawned: [] }
-  };
+  // logFiles: how many runsc trace logs were found for this container. 0 means the
+  // runtime produced no trace at all (runsc started without --strace/--debug-log), so
+  // the empty sections below are an ABSENCE of telemetry, not an observation of nothing.
+  // unusable: logs were found but cannot be trusted as an observation - no syscall line
+  // recognized in a non-empty log (unknown runsc format: an empty result would read as a
+  // clean run), or no package process tree (clone/fork not traced, or no su child).
+  const emptyResult = Object.assign(emptySupplement(), { logFiles: 0, straceLines: 0, scoped: false, unusable: null });
 
   const logFiles = findGvisorLogs(containerId, logDir);
   if (logFiles.length === 0) return emptyResult;
@@ -299,9 +513,13 @@ function parseGvisorLogs(containerId, logDir) {
   const allWrites = new Set();
   const allConnections = new Map();
   const allProcesses = new Map();
+  let straceLines = 0, scoped = false, nonEmpty = false;
 
   for (const logFile of logFiles) {
     const result = parseGvisorLog(logFile);
+    straceLines += result.straceLines || 0;
+    scoped = scoped || !!result.scoped;
+    nonEmpty = nonEmpty || !!result.nonEmpty;
 
     for (const f of result.sensitive_files.read) allReads.add(f);
     for (const f of result.sensitive_files.written) allWrites.add(f);
@@ -318,7 +536,13 @@ function parseGvisorLogs(containerId, logDir) {
   return {
     sensitive_files: { read: [...allReads], written: [...allWrites] },
     network: { http_connections: [...allConnections.values()] },
-    processes: { spawned: [...allProcesses.values()] }
+    processes: { spawned: [...allProcesses.values()] },
+    logFiles: logFiles.length,
+    straceLines,
+    scoped,
+    unusable: straceLines === 0
+      ? (nonEmpty ? 'runsc trace log present but no syscall line recognized (unknown runsc strace format)' : 'runsc trace log is empty')
+      : (scoped ? null : 'runsc trace has no package process tree (clone/fork not in --strace-syscalls, or no su child)')
   };
 }
 
@@ -330,7 +554,7 @@ function parseGvisorLogs(containerId, logDir) {
  * @param {string} logDir - gVisor debug-log base directory
  */
 function cleanupGvisorLogs(containerId, logDir) {
-  logDir = logDir || '/tmp/runsc';
+  logDir = logDir || DEFAULT_GVISOR_LOG_DIR;
   const shortId = containerId.substring(0, 12);
 
   try {
@@ -359,6 +583,9 @@ module.exports = {
   parseGvisorStrace,
   findGvisorLogs,
   cleanupGvisorLogs,
+  gvisorLogDir,
+  DEFAULT_GVISOR_LOG_DIR,
+  TRACED_SYSCALLS,
   // Exported for unit tests
   parseStraceLine,
   extractOpenatPath,

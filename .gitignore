@@ -29,7 +29,7 @@ results.sarif
 
 # --- Logs (with exception for one test fixture) ---
 *.log
-!tests/samples/gvisor/strace-sample.log
+!tests/samples/gvisor/runsc-20260323-behav.log
 
 # --- Cache directories ---
 .muaddib-cache/

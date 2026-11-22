@@ -1064,6 +1064,64 @@ async function runSandboxTests() {
   // spawn) instead of re-deriving the FAKETIME string inline. They pin the exact env contract
   // the container receives: the libfaketime string, the active flag, and NODE_TIMING_OFFSET=0
   // (the anti double-acceleration invariant). buildDockerArgs is KEEP-IN-SYNC with sandbox-runner.sh.
+  test('SANDBOX-DNS: with an upstream, the container resolver is the mock (--dns 127.0.0.1) and the upstream goes by env', () => {
+    const args = buildDockerArgs({ packageName: 'x', mode: 'permissive', upstreamDns: '213.186.33.99', containerName: 't', fakeHostname: 'h' });
+    const i = args.indexOf('--dns');
+    assert(i > 0 && args[i + 1] === '127.0.0.1', '--dns 127.0.0.1 expected (the read-only rootfs forbids rewriting resolv.conf), args=' + JSON.stringify(args));
+    assert(args.includes('MUADDIB_UPSTREAM_DNS=213.186.33.99'), 'the upstream must be passed to the runner');
+    assert(args.indexOf('--dns') < args.indexOf('muaddib-sandbox'), '--dns must be a docker option, before the image');
+  });
+
+  test('SANDBOX-DNS: pickUpstreamNameserver skips loopback and the systemd-resolved stub', () => {
+    const { pickUpstreamNameserver } = require('../../src/sandbox/index.js');
+    assert(pickUpstreamNameserver('nameserver 127.0.0.53\noptions edns0') === null, 'stub only -> null (caller then reads the systemd upstream list)');
+    assert(pickUpstreamNameserver('# x\nnameserver 127.0.0.53\nnameserver 213.186.33.99\n') === '213.186.33.99', 'first non-loopback wins');
+    assert(pickUpstreamNameserver('nameserver ::1\nnameserver 2001:4860:4860::8888') === '2001:4860:4860::8888', 'IPv6 accepted, ::1 skipped');
+    assert(pickUpstreamNameserver('nameserver 1.1.1.1; id') === null, 'a line that is not a bare address is ignored');
+  });
+
+  test('SANDBOX-GVISOR-LOGS: trace directory defaults outside /tmp (the monitor runs with PrivateTmp) and follows MUADDIB_GVISOR_LOG_DIR', () => {
+    const g = require('../../src/sandbox/gvisor-parser.js');
+    const saved = process.env.MUADDIB_GVISOR_LOG_DIR;
+    try {
+      delete process.env.MUADDIB_GVISOR_LOG_DIR;
+      assert(g.gvisorLogDir() === '/var/log/runsc', 'default must be /var/log/runsc, got ' + g.gvisorLogDir());
+      process.env.MUADDIB_GVISOR_LOG_DIR = '/srv/x';
+      assert(g.gvisorLogDir() === '/srv/x', 'env override must apply');
+    } finally {
+      if (saved === undefined) delete process.env.MUADDIB_GVISOR_LOG_DIR; else process.env.MUADDIB_GVISOR_LOG_DIR = saved;
+    }
+  });
+
+  test('SANDBOX-VERSION: registry mode passes the scanned version after the mode (runner installs name@version)', () => {
+    const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', version: '0.30.4', containerName: 't', fakeHostname: 'h' });
+    assert(JSON.stringify(args.slice(-3)) === JSON.stringify(['axios', 'permissive', '0.30.4']),
+      'the last three args must be name, mode, version, got ' + JSON.stringify(args.slice(-3)));
+  });
+
+  test('SANDBOX-VERSION: no version → unchanged argument tail (name, mode)', () => {
+    const args = buildDockerArgs({ packageName: 'axios', mode: 'permissive', containerName: 't', fakeHostname: 'h' });
+    assert(args[args.length - 1] === 'permissive' && args[args.length - 2] === 'axios', 'tail must stay name, mode, got ' + JSON.stringify(args.slice(-2)));
+  });
+
+  test('SANDBOX-VERSION: local mode never appends a version', () => {
+    const args = buildDockerArgs({ packageName: '/x', mode: 'permissive', version: '1.0.0', local: true, localAbsPath: '/x', containerName: 't', fakeHostname: 'h' });
+    assert(args[args.length - 1] === 'permissive', 'local mode tail must end with the mode, got ' + JSON.stringify(args.slice(-2)));
+  });
+
+  test('SANDBOX-VERSION: isSafeVersion accepts semver, refuses shell or option-like strings', () => {
+    const { isSafeVersion } = require('../../src/sandbox/index.js');
+    for (const ok of ['1.14.1', '0.30.4', '6.0.0-rc.1', '1.0.0+build.7', '2.0.0-beta.4']) assert(isSafeVersion(ok), 'should accept ' + ok);
+    for (const bad of ['', '-1.0.0', '1.0.0"; id; "', '1.0.0 && x', '$(id)', '1.0.0`x`', 'a'.repeat(65), null, 1]) assert(!isSafeVersion(bad), 'should refuse ' + JSON.stringify(bad));
+  });
+
+  await asyncTest('SANDBOX-VERSION: an unsafe version is refused before any container starts (INCONCLUSIVE)', async () => {
+    const { runSingleSandbox } = require('../../src/sandbox/index.js');
+    const r = await runSingleSandbox('axios', { version: '1.0.0"; touch /tmp/pwned; "', runTimeout: 1000 });
+    assert(r.score === -1 && r.inconclusive === true && /Invalid version/.test(r.findings[0].detail),
+      'unsafe version must yield INCONCLUSIVE without running, got ' + JSON.stringify(r).slice(0, 200));
+  });
+
   test('SANDBOX-FAKETIME: buildDockerArgs 72h → MUADDIB_FAKETIME=+3d x1000 + ACTIVE + NODE_TIMING_OFFSET=0', () => {
     const args = buildDockerArgs({ timeOffset: 259200000, containerName: 't', fakeHostname: 'h' });
     assert(args.includes('MUADDIB_FAKETIME=+3d x1000'), 'should inject the +3d x1000 libfaketime string, args=' + JSON.stringify(args));

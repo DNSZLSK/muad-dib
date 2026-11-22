@@ -81,6 +81,39 @@ function extractDomain(buf) {
 }
 
 /**
+ * IPv4 addresses (A records) of an upstream DNS response. They are logged for safe
+ * domains so the host can tell a connection to the registry (an IP this resolver handed
+ * out for a safe name) from a connection to an address the package never looked up.
+ * Bounded walk: at most 64 records, each name skipped label by label or by pointer.
+ */
+function extractARecords(buf) {
+  var ips = [];
+  if (!buf || buf.length < 12) return ips;
+  var qd = buf.readUInt16BE(4), an = buf.readUInt16BE(6);
+  var offset = 12;
+  function skipName() {
+    var guard = 0;
+    while (offset < buf.length && guard++ < 128) {
+      var len = buf[offset];
+      if (len === 0) { offset++; return true; }
+      if ((len & 0xC0) === 0xC0) { offset += 2; return true; }
+      offset += 1 + len;
+    }
+    return false;
+  }
+  for (var q = 0; q < qd && q < 16; q++) { if (!skipName()) return ips; offset += 4; }
+  for (var a = 0; a < an && a < 64; a++) {
+    if (!skipName() || offset + 10 > buf.length) return ips;
+    var type = buf.readUInt16BE(offset), rdlen = buf.readUInt16BE(offset + 8);
+    offset += 10;
+    if (offset + rdlen > buf.length) return ips;
+    if (type === 1 && rdlen === 4) ips.push(buf[offset] + '.' + buf[offset + 1] + '.' + buf[offset + 2] + '.' + buf[offset + 3]);
+    offset += rdlen;
+  }
+  return ips;
+}
+
+/**
  * Build a mock DNS A response returning the mock IP.
  * Copies the query, flips QR bit, appends one A answer.
  */
@@ -143,6 +176,8 @@ dnsServer.on('message', function (msg, rinfo) {
     if (safe) {
       forwardToUpstream(msg, function (err, resp) {
         if (resp) {
+          var answers = extractARecords(resp);
+          if (answers.length) logDns({ ts: Date.now(), domain: domain, safe: true, answers: answers });
           dnsServer.send(resp, 0, resp.length, rinfo.port, rinfo.address);
         } else {
           // Upstream failed → SERVFAIL (don't mock safe domains)

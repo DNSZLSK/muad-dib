@@ -1,0 +1,12 @@
+[Unit]
+Description=MUAD'DIB gVisor trace log cleanup (every 10 minutes)
+
+[Timer]
+# Bounds: a trace lives at most 30 min + one period, and the directory stays under
+# 2048 MB + what the sandboxes write in one period.
+OnBootSec=5min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

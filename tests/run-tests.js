@@ -127,6 +127,8 @@ const { runScoringGuardTests } = require('./unit/scoring-guards.test');
 const { runIncompletenessTests } = require('./unit/incompleteness.test');
 const { runScannerBudgetTests } = require('./unit/scanner-budget.test');
 const { runDataDirTests } = require('./unit/data-dir.test');
+const { runRefreshSandboxImageTests } = require('./unit/refresh-sandbox-image.test');
+const { runRunscLogCleanupTests } = require('./unit/runsc-log-cleanup.test');
 const { runIocDbTests } = require('./unit/ioc-db.test');
 const { runCheckOverridesTests } = require('./unit/check-overrides.test');
 const { runDilutionThresholdTests } = require('./unit/dilution-thresholds.test');
@@ -161,6 +163,7 @@ const { runWorkerMemTests } = require('./unit/worker-mem.test');
 const { runPypiCatchupTests } = require('./integration/pypi-catchup.test');
 const { runHeavyLaneTests } = require('./unit/heavy-lane.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
+const { runSandboxRunnerE2ETests } = require('./integration/sandbox-runner-e2e.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
 const { runCliTests } = require('./integration/cli.test');
@@ -291,6 +294,7 @@ async function timed(name, fn) {
   await timed('preload', runPreloadTests);
   await timed('string-ioc-corroboration', runStringIocCorroborationTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
+  await timed('sandbox-runner-e2e', runSandboxRunnerE2ETests);
   await timed('entropy', runEntropyTests);
 
   // Monitor + diff
@@ -414,6 +418,8 @@ async function timed(name, fn) {
   await timed('incompleteness', runIncompletenessTests);
   await timed('scanner-budget', runScannerBudgetTests);
   await timed('data-dir', runDataDirTests);
+  await timed('refresh-sandbox-image', runRefreshSandboxImageTests);
+  await timed('runsc-log-cleanup', runRunscLogCleanupTests);
   await timed('ioc-db', runIocDbTests);
   await timed('check-overrides', runCheckOverridesTests);
   await timed('dilution-thresholds', runDilutionThresholdTests);

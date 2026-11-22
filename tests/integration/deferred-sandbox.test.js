@@ -482,6 +482,56 @@ async function runDeferredSandboxTests() {
     }
   });
 
+  await asyncTest('deferred follow-up webhook only from the alert threshold (20); below it the alert is still updated', async () => {
+    const { enqueueDeferred, processDeferredItem, _resetDeferredQueue, _setRunSandboxForTest, _setFollowUpDepsForTest, DEFERRED_FOLLOWUP_MIN_SCORE } = require('../../src/monitor/deferred-sandbox.js');
+    const { alertedPackageRules } = require('../../src/monitor/webhook.js');
+    const origUrl = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxx';
+    const sent = [], persisted = [];
+    _setFollowUpDepsForTest({ sendWebhook: async (url, embed) => { sent.push(embed); }, persistAlert: (name, version) => { persisted.push(`${name}@${version}`); } });
+    const runWith = async (name, result) => {
+      _resetDeferredQueue();
+      alertedPackageRules.delete(name);
+      _setRunSandboxForTest(() => Promise.resolve(result));
+      enqueueDeferred(makeItem({ name, version: '1.0.0', tier: '1a', riskScore: 60 }));
+      await processDeferredItem({});
+    };
+    try {
+      assert(DEFERRED_FOLLOWUP_MIN_SCORE === 20, 'aligned on the alert threshold, got ' + DEFERRED_FOLLOWUP_MIN_SCORE);
+      // One unknown process (MEDIUM 15): a package that runs its own binary at install.
+      await runWith('binary-at-install', { score: 15, severity: 'LOW', findings: [{ type: 'unknown_process', severity: 'MEDIUM' }] });
+      assert(sent.length === 0, 'score 15 must not send a follow-up webhook, sent ' + sent.length);
+      assert(persisted.includes('binary-at-install@1.0.0'), 'score 15 must still update the alert with the sandbox data');
+      await runWith('reads-credentials', { score: 25, severity: 'MEDIUM', findings: [{ type: 'sensitive_file_read', severity: 'HIGH' }] });
+      assert(sent.length === 1, 'score 25 must send the follow-up webhook, sent ' + sent.length);
+      assert(persisted.includes('reads-credentials@1.0.0'), 'score 25 updates the alert');
+      await runWith('inconclusive-run', { score: -1, severity: 'INCONCLUSIVE', findings: [] });
+      assert(sent.length === 1 && !persisted.includes('inconclusive-run@1.0.0'), 'an INCONCLUSIVE run sends nothing and updates nothing');
+    } finally {
+      _setFollowUpDepsForTest(null);
+      _setRunSandboxForTest(null);
+      _resetDeferredQueue();
+      if (origUrl === undefined) delete process.env.MUADDIB_WEBHOOK_URL; else process.env.MUADDIB_WEBHOOK_URL = origUrl;
+    }
+  });
+
+  await asyncTest('deferred sandbox installs the scanned version, not the registry latest', async () => {
+    const { enqueueDeferred, processDeferredItem, _resetDeferredQueue, _setRunSandboxForTest } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+    const calls = [];
+    try {
+      _setRunSandboxForTest((name, opts) => { calls.push({ name, version: opts && opts.version }); return Promise.resolve({ score: 0, severity: 'CLEAN', findings: [] }); });
+      enqueueDeferred(makeItem({ name: 'ver-pkg', version: '0.30.4', tier: '1b', riskScore: 50 }));
+      await processDeferredItem({});
+      assert(calls.length === 1, `one sandbox run, got ${calls.length}`);
+      assert(calls[0].name === 'ver-pkg' && calls[0].version === '0.30.4',
+        `the deferred run must pass the queued version, got ${JSON.stringify(calls[0])}`);
+    } finally {
+      _setRunSandboxForTest(null);
+      _resetDeferredQueue();
+    }
+  });
+
   test('worker processes highest-score item first (queue ordering via shift)', () => {
     // The worker calls _deferredQueue.shift() to pick items.
     // Since the queue is sorted by riskScore DESC, shift() always picks the highest.

@@ -1,0 +1,15 @@
+[Unit]
+Description=MUAD'DIB gVisor trace log cleanup (age and size bound)
+Documentation=https://github.com/DNSZLSK/muad-dib
+
+[Service]
+Type=oneshot
+# Root: runsc writes the traces as root (directories 0755), the monitor cannot delete them.
+# Installed outside the git checkout (scripts/install-gvisor.sh): an untracked file inside
+# /opt/muaddib would make the fast-forward of deploy/auto-update.sh fail.
+ExecStart=/bin/bash /usr/local/sbin/muaddib-runsc-log-cleanup.sh /var/log/runsc 30 2048
+Nice=10
+IOSchedulingClass=idle
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

@@ -53,6 +53,12 @@ const DEFERRED_STATE_FILE = dataPath('deferred-queue.json');
 // slot. HIGH=10 pts is the intended T1b floor — values below 5 are LOW-only
 // aggregates which carry no actionable sandbox signal.
 const DEFERRED_MIN_SCORE = 5;
+// A deferred sandbox result sends a follow-up webhook only from the alert threshold up
+// (20: the default webhook threshold of getWebhookThreshold and the score >= 20 alert
+// level). Below it the alert is still updated with the sandbox data, without a webhook:
+// one unknown process (MEDIUM 15, e.g. a package that runs its own binary at install,
+// esbuild, sharp's `which`) is not a sandbox detection on its own.
+const DEFERRED_FOLLOWUP_MIN_SCORE = 20;
 // Hard ceiling on a single deferred sandbox run so a deferred slot can never
 // wedge. maxRuns=1 self-bounds at ~SINGLE_RUN_TIMEOUT (90s) + the sandbox
 // watchdog grace; this AbortController is belt-and-suspenders.
@@ -99,6 +105,8 @@ let _deferredSlotsActive = 0;    // Concurrent deferred sandbox runs in flight (
 // Indirection so tests can inject a controllable async sandbox without Docker
 // (the concurrency contract is verified behaviorally, not by source-grep).
 let _runSandboxFn = runSandbox;
+// Follow-up side effects (network, alert files), replaceable in tests.
+let _followUpDeps = { sendWebhook, persistAlert };
 
 // ── Queue management ──
 
@@ -270,7 +278,7 @@ async function processDeferredItem(stats) {
     // single-run (maxRuns=1, ~90s vs ~270s) for fast deferred-queue drain.
     const maxRuns = item.tier === '1a' ? undefined : 1;
     markSandboxed(item.name); // stamp for sandbox-revalidation cadence (matches the synchronous path)
-    sandboxResult = await _runSandboxFn(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal });
+    sandboxResult = await _runSandboxFn(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal, version: item.version });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
@@ -298,8 +306,12 @@ async function processDeferredItem(stats) {
     const previousRules = alertedPackageRules.get(item.name);
     const alreadySentFollowUp = previousRules && previousRules.has(deferredDedupKey);
 
+    const belowFollowUp = sandboxResult.score < DEFERRED_FOLLOWUP_MIN_SCORE;
+    if (belowFollowUp) {
+      console.log(`[DEFERRED] BELOW FOLLOW-UP THRESHOLD: ${key} (sandbox score=${sandboxResult.score} < ${DEFERRED_FOLLOWUP_MIN_SCORE}) - alert updated, no webhook`);
+    }
     if (!alreadySentFollowUp) {
-      const url = getWebhookUrl();
+      const url = belowFollowUp ? null : getWebhookUrl();
       if (url) {
         try {
           const embed = buildDeferredFollowUpEmbed(
@@ -307,7 +319,7 @@ async function processDeferredItem(stats) {
             sandboxResult,
             item.riskScore
           );
-          await sendWebhook(url, embed, { rawPayload: true });
+          await _followUpDeps.sendWebhook(url, embed, { rawPayload: true });
           console.log(`[DEFERRED] FOLLOW-UP WEBHOOK: ${key} (sandbox score=${sandboxResult.score})`);
 
           // Track in dedup map
@@ -327,7 +339,7 @@ async function processDeferredItem(stats) {
           item.name, item.version, item.ecosystem,
           item.staticResult, sandboxResult
         );
-        persistAlert(item.name, item.version, item.ecosystem, alertData);
+        _followUpDeps.persistAlert(item.name, item.version, item.ecosystem, alertData);
         console.log(`[DEFERRED] ALERT PERSISTED: ${key} (with sandbox data)`);
       } catch (persistErr) {
         console.error(`[DEFERRED] ALERT PERSIST FAILED: ${key} — ${persistErr.message}`);
@@ -336,7 +348,7 @@ async function processDeferredItem(stats) {
       console.log(`[DEFERRED] DEDUP: follow-up already sent for ${item.name}`);
     }
   } else {
-    console.log(`[DEFERRED] CLEAN: ${key} (sandbox score=0, static score=${item.riskScore})`);
+    console.log(`[DEFERRED] ${sandboxResult && sandboxResult.score < 0 ? 'INCONCLUSIVE' : 'CLEAN'}: ${key} (sandbox score=${sandboxResult ? sandboxResult.score : 'none'}, static score=${item.riskScore})`);
   }
 
   return sandboxResult;
@@ -544,6 +556,10 @@ function _setRunSandboxForTest(fn) {
   _runSandboxFn = fn || runSandbox;
 }
 
+function _setFollowUpDepsForTest(deps) {
+  _followUpDeps = deps ? { sendWebhook: deps.sendWebhook || sendWebhook, persistAlert: deps.persistAlert || persistAlert } : { sendWebhook, persistAlert };
+}
+
 // True while at least one deferred sandbox is in flight. Kept for back-compat
 // (callers/tests that only care "is the deferred path active"); use
 // getDeferredSlotsActive() for the concurrent count.
@@ -584,7 +600,9 @@ module.exports = {
   clearDeferredQueue,
   _resetDeferredQueue,
   _setRunSandboxForTest,
+  _setFollowUpDepsForTest,
   DEFERRED_QUEUE_MAX,
+  DEFERRED_FOLLOWUP_MIN_SCORE,
   DEFERRED_SANDBOX_SLOTS,
   DEFERRED_TTL_MS,
   DEFERRED_MAX_RETRIES,

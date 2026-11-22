@@ -35,7 +35,7 @@ const {
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { analyzePreloadLog } = require('./analyzer.js');
 const { classifyDomain } = require('./network-allowlist.js');
-const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
+const { parseGvisorLogs, cleanupGvisorLogs, gvisorLogDir: resolveGvisorLogDir, TRACED_SYSCALLS } = require('./gvisor-parser.js');
 
 // ── Event-loop stall attribution for the sandbox's SYNCHRONOUS docker CLI calls ──
 // (2026-07-03) These execFileSync/execSync 'docker' calls run on the MAIN thread.
@@ -250,6 +250,84 @@ function imageExists() {
 
 let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
 let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
+let _gvisorTelemetryWarned = false; // throttle the missing-gVisor-trace warning to once per process
+let _gvisorUnusableWarned = false; // same, for a trace that exists but cannot be read
+let _mockDnsWarned = false;         // throttle the mock-network-not-in-DNS-path warning to once per process
+
+// First usable nameserver of a resolv.conf text: loopback addresses (127.0.0.0/8, ::1, the
+// systemd-resolved stub 127.0.0.53) are unreachable from inside a container. Pure.
+function pickUpstreamNameserver(text) {
+  if (typeof text !== 'string') return null;
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length !== 2 || parts[0] !== 'nameserver') continue;
+    const ip = parts[1];
+    if (ip.startsWith('127.') || ip === '::1') continue;
+    const v4 = ip.split('.');
+    if (v4.length === 4 && v4.every(o => /^\d{1,3}$/.test(o))) return ip;
+    if (ip.includes(':') && /^[0-9A-Fa-f:]+$/.test(ip)) return ip;
+  }
+  return null;
+}
+
+function readTextOrNull(read) {
+  try { return read(); } catch { return null; }
+}
+
+// Upstream resolver for the sandbox mock DNS, read once per process: MUADDIB_SANDBOX_UPSTREAM_DNS,
+// else the host resolv.conf, else the systemd-resolved upstream list, else a public resolver.
+let _upstreamDnsCache;
+function resolveSandboxUpstreamDns() {
+  if (_upstreamDnsCache !== undefined) return _upstreamDnsCache;
+  const fromEnv = pickUpstreamNameserver(`nameserver ${process.env.MUADDIB_SANDBOX_UPSTREAM_DNS || ''}`);
+  const found = fromEnv
+    || pickUpstreamNameserver(readTextOrNull(() => fs.readFileSync('/etc/resolv.conf', 'utf8')))
+    || pickUpstreamNameserver(readTextOrNull(() => fs.readFileSync('/run/systemd/resolve/resolv.conf', 'utf8')));
+  _upstreamDnsCache = found || '8.8.8.8';
+  return _upstreamDnsCache;
+}
+
+// A registry version string safe to pass to the runner, where it is interpolated into
+// `sh -c`: semver characters only (digits, letters, '.', '-', '+'), bounded length,
+// starting with an alphanumeric (no option-like leading '-').
+function isSafeVersion(v) {
+  return typeof v === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/.test(v);
+}
+
+// Why a sandbox run that observed no behavior (score 0) cannot be read as benign.
+// Pure: returns { reasons: string[], evidence: string } or null when the run is usable.
+//   - npm install failed (non-zero exit: package not found, EACCES, a failing install
+//     script...): what was meant to run did not, or did not run to the end;
+//   - the entry point could not be loaded (runner prints [ENTRY_ERROR]);
+//   - the gVisor runtime produced no trace log (telemetryMissing): the process, file and
+//     network sections are empty because nothing was recorded.
+function incompleteRunReasons(report, ctx = {}) {
+  if (!report) return null;
+  const reasons = [];
+  const kinds = []; // stable codes, one per reason (journal line per run, load counts)
+  let evidence = '';
+  if (typeof report.exit_code === 'number' && report.exit_code !== 0) {
+    reasons.push(`npm install failed (exit ${report.exit_code})`);
+    kinds.push('install_failed');
+    // npm prints its errors last.
+    evidence = String(report.install_output || '').slice(-300);
+  }
+  if (typeof report.entrypoint_output === 'string' && /\[ENTRY_ERROR\]/.test(report.entrypoint_output)) {
+    reasons.push('Entry point require() failed');
+    kinds.push('entry_failed');
+    if (!evidence) evidence = report.entrypoint_output.substring(0, 300);
+  }
+  if (ctx.telemetryMissing) {
+    reasons.push('no gVisor trace log (process, file and network telemetry unavailable)');
+    kinds.push('trace_missing');
+    if (!evidence) evidence = 'runsc produced no --strace/--debug-log output for this container';
+  } else if (ctx.telemetryUnusable) {
+    reasons.push('gVisor trace unusable (process, file and network telemetry unavailable)');
+    kinds.push('trace_unusable');
+    if (!evidence) evidence = String(ctx.telemetryUnusable);
+  }
+  return reasons.length ? { reasons, kinds, evidence } : null;
+}
 
 function isGvisorAvailable() {
   if (_gvisorAvailableCache !== undefined) return _gvisorAvailableCache;
@@ -344,7 +422,8 @@ async function buildSandboxImage() {
 function buildDockerArgs(opts = {}) {
   const {
     strict = false, canaryTokens = null, timeOffset = 0, gvisorMode = false,
-    containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode
+    containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode,
+    version = null, upstreamDns = null
   } = opts;
 
   const dockerArgs = [
@@ -359,9 +438,23 @@ function buildDockerArgs(opts = {}) {
     '--cap-drop=ALL'
   ];
 
+  // Mock network in the DNS path: the root filesystem is read-only, so the runner cannot
+  // rewrite /etc/resolv.conf itself (that write failed silently and every query went to the
+  // real resolver). Docker writes the container's resolv.conf at creation time instead; the
+  // mock DNS forwards safe domains to upstreamDns (passed by env, unset by the runner).
+  if (upstreamDns) {
+    dockerArgs.push('--dns', '127.0.0.1');
+    dockerArgs.push('-e', `MUADDIB_UPSTREAM_DNS=${upstreamDns}`);
+  }
+
   // gVisor runtime: use runsc instead of default runc.
-  // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
-  //   "runsc": { "path": "/usr/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory"] }
+  // daemon.json must keep the trace flags next to the performance ones, otherwise the
+  // runtime writes no trace and the report has no process / file / network data:
+  //   "runsc": { "path": "/usr/local/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory",
+  //     "--strace", "--strace-syscalls=openat,open,connect,execve,execveat,clone,clone3,fork,vfork",
+  //     "--debug-log=/var/log/runsc/%ID%/", "--log-packets"] }
+  // (see scripts/install-gvisor.sh; the host reports runs without a usable trace - none, an
+  // unknown format, or no clone/fork lines to find the package's processes - as INCONCLUSIVE).
   // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
   // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
   // These flags require gVisor >= 2023-06-01.
@@ -416,7 +509,10 @@ function buildDockerArgs(opts = {}) {
   }
 
   dockerArgs.push('--tmpfs', '/tmp:rw,nosuid,size=64m');
-  dockerArgs.push('--tmpfs', '/sandbox/install:rw,nosuid,size=256m');
+  // exec: Docker mounts a --tmpfs noexec unless told otherwise, so a package that runs a
+  // binary it ships (esbuild, swc...) failed to install (EACCES) and was never analyzed.
+  // The container (and gVisor) is the isolation boundary, not this mount option.
+  dockerArgs.push('--tmpfs', '/sandbox/install:rw,exec,nosuid,size=256m');
   dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
   dockerArgs.push('--read-only');
 
@@ -432,6 +528,9 @@ function buildDockerArgs(opts = {}) {
   dockerArgs.push(DOCKER_IMAGE);
   dockerArgs.push(local ? '/sandbox/local-pkg' : packageName);
   dockerArgs.push(mode);
+  // Exact version to install (registry mode only): the runner installs <name>@<version>
+  // instead of resolving `latest` at run time. Validated by the caller (isSafeVersion).
+  if (!local && version) dockerArgs.push(version);
 
   return dockerArgs;
 }
@@ -453,6 +552,10 @@ async function runSingleSandbox(packageName, options = {}) {
   const localAbsPath = options.localAbsPath || null;
   const displayName = options.displayName || packageName;
   const mode = strict ? 'strict' : 'permissive';
+  const version = (!local && options.version) ? options.version : null;
+  if (version && !isSafeVersion(version)) {
+    return inconclusiveResult(`Invalid version string, sandbox not run: ${String(version).slice(0, 40)}`);
+  }
   const timeOffset = options.timeOffset || 0;
   const runTimeout = options.runTimeout || CONTAINER_TIMEOUT;
   const gvisorMode = options.gvisor || false;
@@ -517,7 +620,8 @@ async function runSingleSandbox(packageName, options = {}) {
 
     const dockerArgs = buildDockerArgs({
       strict, canaryTokens, timeOffset, gvisorMode,
-      containerName, fakeHostname, local, localAbsPath, packageName, mode
+      containerName, fakeHostname, local, localAbsPath, packageName, mode, version,
+      upstreamDns: resolveSandboxUpstreamDns()
     });
 
     const proc = spawn('docker', dockerArgs);
@@ -643,12 +747,42 @@ async function runSingleSandbox(packageName, options = {}) {
         return;
       }
 
+      // The runner reports whether the mock network was really in the DNS path. When it was
+      // not, non-safe domains reached the real resolver and the honeypot saw nothing.
+      if (report.mock_network && report.mock_network.dns_in_path === false && !_mockDnsWarned) {
+        _mockDnsWarned = true;
+        console.warn(`[SANDBOX] WARNING: mock network not in the DNS path (started=${report.mock_network.started}) - DNS went to the real resolver; image or host older than the --dns wiring?`);
+      }
+
+      let gvisorTelemetryMissing = false;
+      let gvisorTelemetryUnusable = null;
       // In gVisor mode, merge kernel-level strace data from gVisor debug logs.
       // sandbox-runner.sh skips strace/tcpdump in gVisor mode, so file access,
       // connections, and process data come from gVisor's kernel-level tracing.
       if (gvisorMode && gvisorContainerId) {
-        const gvisorLogDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+        const gvisorLogDir = resolveGvisorLogDir();
+        const parseStart = Date.now();
         const gvisorData = syncStep('sandbox:gvisor-parse', { container: gvisorContainerId }, () => parseGvisorLogs(gvisorContainerId, gvisorLogDir));
+        const parseMs = Date.now() - parseStart; // synchronous on the main thread: logged to watch it
+        if (!gvisorData.logFiles) {
+          // No runsc trace at all: the process / file / network sections below stay empty
+          // because nothing was recorded, not because nothing happened.
+          gvisorTelemetryMissing = true;
+          if (!_gvisorTelemetryWarned) {
+            _gvisorTelemetryWarned = true;
+            console.warn(`[SANDBOX] WARNING: no gVisor trace log found in ${gvisorLogDir} - process, file and network telemetry unavailable; runsc needs --strace --strace-syscalls=${[...TRACED_SYSCALLS].join(',')} --debug-log=${gvisorLogDir}/%ID%/ --log-packets. Runs with no other signal are reported INCONCLUSIVE.`);
+          }
+        } else if (gvisorData.unusable) {
+          // Logs exist but cannot be read as an observation (unknown format, or no package
+          // process tree): empty sections here would read as a clean run.
+          gvisorTelemetryUnusable = gvisorData.unusable;
+          if (!_gvisorUnusableWarned) {
+            _gvisorUnusableWarned = true;
+            console.warn(`[SANDBOX] WARNING: gVisor trace unusable - ${gvisorData.unusable} (${gvisorData.logFiles} file(s), ${gvisorData.straceLines} syscall line(s)). Runs with no other signal are reported INCONCLUSIVE.`);
+          }
+        } else {
+          console.log(`[SANDBOX] gVisor trace logs: ${gvisorData.logFiles} file(s), ${gvisorData.straceLines} syscall line(s) parsed in ${parseMs} ms`);
+        }
 
         // Merge gVisor findings into report without duplicating
         if (!report.sensitive_files) report.sensitive_files = { read: [], written: [] };
@@ -730,24 +864,19 @@ async function runSingleSandbox(packageName, options = {}) {
       }, score + preloadScore));
 
       // ── Prevent false CLEAN when sandbox couldn't fully analyze ──
-      // If score is 0 but install or entry point failed, mark INCONCLUSIVE
-      // so downstream (monitor, webhook) doesn't treat this as confirmed benign.
+      // If score is 0 but the run could not observe the package (install or entry point
+      // failed, or the runtime produced no trace), mark INCONCLUSIVE so downstream
+      // (monitor, webhook) doesn't treat this as confirmed benign.
       if (finalScore === 0) {
-        const entryError = report.entrypoint_output &&
-          /\[ENTRY_ERROR\]/.test(report.entrypoint_output);
-        const installNotFound = report.exit_code !== 0 &&
-          report.exit_code !== undefined &&
-          report.install_output &&
-          /ERR! (?:code E404|404|code ETARGET|code ERESOLVE)/.test(report.install_output);
-        if (entryError || installNotFound) {
-          const reason = installNotFound
-            ? `npm install failed (exit ${report.exit_code})`
-            : 'Entry point require() failed';
+        const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing, telemetryUnusable: gvisorTelemetryUnusable });
+        if (incomplete) {
+          // One line per run (the warnings above are printed once per process).
+          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')}`);
           findings.push({
             type: 'sandbox_incomplete',
             severity: 'MEDIUM',
-            detail: `${reason} — behavioral analysis incomplete`,
-            evidence: ((installNotFound ? report.install_output : report.entrypoint_output) || '').substring(0, 300)
+            detail: `${incomplete.reasons.join('; ')} — behavioral analysis incomplete`,
+            evidence: incomplete.evidence
           });
           resolve({
             score: -1, severity: 'INCONCLUSIVE', findings, raw_report: report,
@@ -875,7 +1004,7 @@ async function runSandbox(packageName, options = {}) {
     // maxRuns: cap number of time-offset runs. Default: all TIME_OFFSETS (3 runs).
     // T1b/T2 use maxRuns=1 to reduce 270s→90s — time bomb detection is a luxury under load.
     const effectiveRuns = Math.min(options.maxRuns || TIME_OFFSETS.length, TIME_OFFSETS.length);
-    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${effectiveRuns}, slots: ${slotInfo})...`);
+    console.log(`[SANDBOX] Analyzing "${displayName}${!local && options.version ? "@" + options.version : ""}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${effectiveRuns}, slots: ${slotInfo})...`);
 
     const allRuns = [];
     let bestResult = cleanResult;
@@ -894,6 +1023,7 @@ async function runSandbox(packageName, options = {}) {
         local,
         localAbsPath,
         displayName,
+        version: local ? null : (options.version || null),
         timeOffset: offset,
         runTimeout: SINGLE_RUN_TIMEOUT,
         gvisor: useGvisor,
@@ -1066,9 +1196,23 @@ function scoreFindings(report) {
   }
 
   // 5a. TCP connections — classify via network allowlist
+  // A connection carries only an IP. An IP that the sandbox resolver handed out for a
+  // domain the HOST classifies as safe (mock DNS answers, safe_dns_resolutions; or the
+  // tcpdump resolutions in runc mode), on 80/443, is the registry / code-hosting traffic
+  // of the install itself: without this every registry install scores 25 per IP.
+  // Known trade-off: the safe list includes multi-tenant hosts (GitHub, *.s3.amazonaws.com,
+  // storage.googleapis.com, jsDelivr, unpkg) and shared CDN addresses, so an upload to
+  // one of them (a gist, a bucket the attacker owns, a site fronted by the same CDN IP) is
+  // not seen through the DNS/IP signals - the same blind spot the DNS check (4a) already
+  // has for those domains. Payload-level signals (canary tokens in bodies) still apply.
+  const safeResolvedIps = new Set();
+  for (const r of [...(report.network?.safe_dns_resolutions || []), ...(report.network?.dns_resolutions || [])]) {
+    if (r && typeof r.ip === 'string' && classifyDomain(r.domain) === 'safe') safeResolvedIps.add(r.ip);
+  }
   for (const conn of (report.network?.http_connections || [])) {
     if (SAFE_IPS.includes(conn.host)) continue;
     if (PROBE_PORTS.includes(conn.port)) continue;
+    if (safeResolvedIps.has(conn.host) && (conn.port === 443 || conn.port === 80)) continue;
     const cls = classifyDomain(conn.host);
     if (cls === 'safe') continue;
     if (cls === 'blacklisted') {
@@ -1290,4 +1434,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, incompleteRunReasons, isSafeVersion, pickUpstreamNameserver, resolveSandboxUpstreamDns, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
