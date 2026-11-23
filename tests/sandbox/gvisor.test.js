@@ -247,6 +247,55 @@ async function runGvisorTests() {
       assert(nested.sensitive_files.read.some(f => /\.gitconfig$/.test(f)), 'an npm below the root must have its .gitconfig read counted, got ' + JSON.stringify(nested.sensitive_files.read));
     });
 
+    // npm extracts every package file itself (root npm, libuv-worker threads of its tgid):
+    // a published file named .npmrc.template or .env.local is written by that extraction,
+    // not by package code. Real lines are duplicated with only the path changed, so the
+    // process attribution stays the one of the real trace.
+    const addOpen = (trace, lineRe, newPath) => {
+      const line = trace.split('\n').find(l => lineRe.test(l));
+      assert(line, 'fixture precondition: no line matches ' + lineRe);
+      const m = line.match(/, 0x[0-9a-f]+ (\/[^,]+), O_/);
+      return trace + '\n' + line.replace(m[1], newPath);
+    };
+    const ROOT_NPM_WRITE = /\[ +6: +\d+\] libuv-worker X openat\(AT_FDCWD \/tmp\/fxw\/app, 0x[0-9a-f]+ \/tmp\/fxw\/app\/node_modules\/media-typer\/package\.json, O_WRONLY/;
+    const NESTED_NPM_WRITE = /\[ +11: +\d+\] libuv-worker X openat\(AT_FDCWD \/tmp\/fx-home-5oRLjM\/app, 0x[0-9a-f]+ \/tmp\/fx-home-5oRLjM\/app\/node_modules\/media-typer\/package\.json, O_WRONLY/;
+    const SCRIPT_WRITE = /\[ +26: +26\] sh X openat\(AT_FDCWD \/tmp\/fxw\/app\/node_modules\/sharp, 0x[0-9a-f]+ \/dev\/null, O_WRONLY/;
+    const NESTED_NPM_READ = /\[ +11: +11\] MainThread X openat\(AT_FDCWD \/tmp\/fx-home-5oRLjM\/app, 0x[0-9a-f]+ \/usr\/lib\/node_modules\/npm\/package\.json, O_RDONLY/;
+
+    test('GVISOR: real trace - root npm tarball extraction of files named .npmrc.template / .env.local is not a sensitive write', () => {
+      let t = addOpen(INSTALLS.express, ROOT_NPM_WRITE, '/tmp/fxw/app/node_modules/ant-design-vue/scripts/.npmrc.template');
+      t = addOpen(t, ROOT_NPM_WRITE, '/tmp/fxw/app/node_modules/@builder.io/qwik/dist/starters/features/turso/.env.local');
+      const w = parseGvisorStrace(t).sensitive_files.written;
+      assert(w.length === 0, 'root npm tarball extraction writes must not count, got ' + JSON.stringify(w));
+    });
+
+    test('GVISOR: real trace - the same write by an npm started below the root (nested) stays counted', () => {
+      const t = addOpen(load('runsc-20260323-nested-npm-express.log.gz'), NESTED_NPM_WRITE, '/tmp/fx-home-5oRLjM/app/node_modules/x/scripts/.npmrc.template');
+      const w = parseGvisorStrace(t).sensitive_files.written;
+      assert(w.some(f => /\.npmrc\.template$/.test(f)), 'a nested npm write must count, got ' + JSON.stringify(w));
+    });
+
+    test('GVISOR: real trace - an install script writing under node_modules stays counted', () => {
+      const t = addOpen(INSTALLS.sharp, SCRIPT_WRITE, '/tmp/fxw/app/node_modules/sharp/.npmrc');
+      const w = parseGvisorStrace(t).sensitive_files.written;
+      assert(w.includes('/tmp/fxw/app/node_modules/sharp/.npmrc'), 'an install script write must count, got ' + JSON.stringify(w));
+    });
+
+    test('GVISOR: real trace - a root npm write outside node_modules, or through node_modules/.., stays counted', () => {
+      for (const p of ['/tmp/fxw/app/.npmrc', '/tmp/fxw/app/node_modules/../.npmrc']) {
+        const w = parseGvisorStrace(addOpen(INSTALLS.express, ROOT_NPM_WRITE, p)).sensitive_files.written;
+        assert(w.length === 1, `root npm write to ${p} must count, got ` + JSON.stringify(w));
+      }
+    });
+
+    test('GVISOR: real trace - .env matches a file name (.env, .env.local), not process.env.js', () => {
+      const nested = load('runsc-20260323-nested-npm-express.log.gz');
+      const benign = parseGvisorStrace(addOpen(nested, NESTED_NPM_READ, '/tmp/fx-home-5oRLjM/app/node_modules/@dabh/diagnostics/adapters/process.env.js')).sensitive_files.read;
+      assert(!benign.some(f => /process\.env\.js$/.test(f)), 'process.env.js is not a .env file, got ' + JSON.stringify(benign));
+      const real = parseGvisorStrace(addOpen(nested, NESTED_NPM_READ, '/tmp/fx-home-5oRLjM/app/.env.local')).sensitive_files.read;
+      assert(real.some(f => /\/\.env\.local$/.test(f)), '.env.local must stay sensitive, got ' + JSON.stringify(real));
+    });
+
     test('GVISOR: real trace - npm NOT started by the su shell (as by an install script) has its ~/.npmrc read counted', () => {
       const t = load('runsc-20260323-nested-npm-express.log.gz');
       const { parsed, scored } = score(t, true);
