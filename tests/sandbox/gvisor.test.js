@@ -228,6 +228,38 @@ async function runGvisorTests() {
       assert(sh.score === 15 && sh.findings.length === 1 && sh.findings[0].evidence === '/usr/bin/which', 'sharp install/check runs which, got ' + JSON.stringify(sh));
     });
 
+    // A process finding says what ran it: the image that ran just before the exec (the
+    // process itself before an in-place exec, else its parent), with the script for node,
+    // and the first arguments, bounded (both chosen by the package).
+    const spawnedOf = (trace, re) => parseGvisorStrace(trace).processes.spawned.find(p => re.test(p.command));
+
+    test('GVISOR: real trace - a process records its launcher and arguments (sharp: sh runs which brew)', () => {
+      const p = spawnedOf(INSTALLS.sharp, /\/usr\/bin\/which$/);
+      assert(p && p.launcher === 'sh', 'launcher should be sh, got ' + JSON.stringify(p));
+      assert(JSON.stringify(p.argv) === JSON.stringify(['which', 'brew']), 'argv should be which brew, got ' + JSON.stringify(p && p.argv));
+    });
+
+    test('GVISOR: real trace - a node launcher is named with its script (esbuild: node install.js)', () => {
+      const p = spawnedOf(INSTALLS.esbuild, /esbuild\/bin\/esbuild$/);
+      assert(p && p.launcher === 'node install.js', 'launcher should be node install.js, got ' + JSON.stringify(p));
+      assert(p.argv[1] === '--version', 'got ' + JSON.stringify(p.argv));
+    });
+
+    test('GVISOR: real trace - recorded arguments are bounded (4 arguments, 60 characters each)', () => {
+      const long = '"' + 'a'.repeat(300) + '"';
+      // Both the syscall entry (E) and exit (X) lines carry the argv: replace every occurrence.
+      const t = INSTALLS.sharp.replace(/(\/usr\/bin\/which, 0x[0-9a-f]+ )\["which", "brew"\]/g, `$1["which", ${Array(9).fill(long).join(', ')}]`);
+      const p = spawnedOf(t, /\/usr\/bin\/which$/);
+      assert(p && p.argv.length === 4 && p.argv.every(a => a.length <= 60), 'got ' + JSON.stringify(p && p.argv.map(a => a.length)));
+    });
+
+    test('GVISOR: process findings carry the launcher and arguments as context; the score is unchanged', () => {
+      const sh = score(INSTALLS.sharp, true).scored;
+      assert(sh.score === 15 && sh.findings[0].context === 'launched by sh; argv: which brew', 'got ' + JSON.stringify(sh.findings));
+      const bare = scoreFindings({ processes: { spawned: [{ command: '/usr/bin/python3', pid: 1 }] } });
+      assert(bare.score === 40 && bare.findings[0].context === undefined, 'no launcher recorded (runc mode): no context, got ' + JSON.stringify(bare.findings));
+    });
+
     test('GVISOR: real trace - failed execs of a PATH search (printed "= 0", no errno) are not processes', () => {
       const t = INSTALLS.express;
       assert(/X execve\(0x[0-9a-f]+ \/usr\/local\/sbin\/env, .*\) = 0 \(0x0\) \(/.test(t), 'fixture precondition: the failed attempt is printed as a success');
