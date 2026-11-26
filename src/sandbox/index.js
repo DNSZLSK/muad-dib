@@ -180,9 +180,17 @@ function oneLine(s, max) {
 }
 
 /** "type/SEVERITY: evidence | ..." for the first `max` findings (journal line, not a report). */
+// What ran a process (gVisor trace only): launcher and first arguments, for review.
+function processContext(p) {
+  const parts = [];
+  if (p.launcher) parts.push(`launched by ${p.launcher}`);
+  if (Array.isArray(p.argv) && p.argv.length) parts.push(`argv: ${p.argv.join(' ')}`);
+  return parts.length ? parts.join('; ') : null;
+}
+
 function formatSandboxFindings(findings, max = 8) {
   const list = (findings || []).filter(f => f && f.type);
-  const shown = list.slice(0, max).map(f => `${f.type}/${f.severity || '?'}: ${oneLine(f.evidence || f.detail, 120)}`);
+  const shown = list.slice(0, max).map(f => `${f.type}/${f.severity || '?'}: ${oneLine(f.evidence || f.detail, 120)}${f.context ? ` (${oneLine(f.context, 100)})` : ''}`);
   return shown.join(' | ') + (list.length > max ? ` | +${list.length - max} more` : '');
 }
 
@@ -1326,12 +1334,14 @@ function scoreFindings(report) {
     const cmd = p.command || '';
     const basename = path.basename(cmd);
     if (SAFE_SANDBOX_CMDS.has(basename)) continue; // Skip sandbox infrastructure
+    const context = processContext(p);
+    const extra = context ? { context } : {};
     if (DANGEROUS_CMDS.some(d => basename === d)) {
       score += 40;
-      findings.push({ type: 'suspicious_process', severity: 'CRITICAL', detail: `Dangerous command spawned: ${cmd}`, evidence: cmd });
+      findings.push({ type: 'suspicious_process', severity: 'CRITICAL', detail: `Dangerous command spawned: ${cmd}`, evidence: cmd, ...extra });
     } else if (cmd) {
       score += 15;
-      findings.push({ type: 'unknown_process', severity: 'MEDIUM', detail: `Unknown process spawned: ${cmd}`, evidence: cmd });
+      findings.push({ type: 'unknown_process', severity: 'MEDIUM', detail: `Unknown process spawned: ${cmd}`, evidence: cmd, ...extra });
     }
   }
 

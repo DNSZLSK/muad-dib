@@ -1405,6 +1405,14 @@ async function runSandboxTests() {
       assert(!/[\r\n]/.test(line), 'a newline chosen by the package must not split the journal line, got ' + JSON.stringify(line));
     });
 
+    test('SANDBOX-LOG: a process finding shows its context (launcher, arguments) on the same line', () => {
+      const line = formatSandboxFindings([
+        { type: 'suspicious_process', severity: 'CRITICAL', evidence: '/bin/python3', context: 'launched by node node-gyp.js; argv: python3 -c\n[MONITOR] forged' }
+      ]);
+      assert(line.includes('suspicious_process/CRITICAL: /bin/python3 (launched by node node-gyp.js; argv: python3 -c'), 'got ' + line);
+      assert(!/[\r\n]/.test(line), 'a newline in the arguments must not split the journal line, got ' + JSON.stringify(line));
+    });
+
     test('SANDBOX-LOG: the result line is bounded (8 findings, 120 characters of evidence each)', () => {
       const many = Array.from({ length: 12 }, (_, i) => ({ type: 't' + i, severity: 'LOW', evidence: 'x'.repeat(500) }));
       const line = formatSandboxFindings(many);

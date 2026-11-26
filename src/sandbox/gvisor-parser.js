@@ -60,6 +60,20 @@ function gvisorLogDir() {
 
 const SENSITIVE_PATTERN = /\.npmrc|\.ssh\/|\.aws\/|\.env(?:$|[^a-zA-Z])|\/etc\/passwd|\/etc\/shadow|\.gitconfig|\.bash_history/;
 
+// What ran a process, for review: the image that ran just before its exec (the process
+// itself before an in-place exec, else its parent), with the script for an interpreter,
+// and its first arguments. Both are chosen by the package: bounded here, neutralized
+// where they are printed.
+const ARGV_KEPT = 4;
+const ARG_KEPT_LEN = 60;
+const INTERPRETER_RE = /^(?:node|nodejs|python[0-9.]*)$/;
+function describeLauncher(e) {
+  if (!e) return null;
+  const image = path.basename(e.path);
+  const script = INTERPRETER_RE.test(image) && e.argv && e.argv[1] ? path.basename(String(e.argv[1])).slice(0, ARG_KEPT_LEN) : '';
+  return script ? `${image} ${script}` : image;
+}
+
 // Processes that are sandbox infrastructure — not spawned by the package
 const SAFE_PROCESSES = new Set(['node', 'npm', 'npx', 'sh', 'git']);
 
@@ -323,11 +337,15 @@ function parseGvisorStrace(content) {
 
   // Program image of a process just before event `index`: its last exec before it, else
   // the parent's image when it was cloned (independent of the order lines were written).
-  const imageAt = (tgid, index, depth = 0) => {
+  const execAt = (tgid, index, depth = 0) => {
     const list = execs.get(tgid) || [];
-    for (let i = list.length - 1; i >= 0; i--) if (list[i].index < index) return path.basename(list[i].path);
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].index < index) return list[i];
     if (depth > 64 || !parentOf.has(tgid)) return null;
-    return imageAt(parentOf.get(tgid), cloneIndex.get(tgid), depth + 1);
+    return execAt(parentOf.get(tgid), cloneIndex.get(tgid), depth + 1);
+  };
+  const imageAt = (tgid, index) => {
+    const e = execAt(tgid, index);
+    return e ? path.basename(e.path) : null;
   };
 
   // Roots: a shell exec'd by a process whose image is su - the su child (util-linux su
@@ -385,7 +403,13 @@ function parseGvisorStrace(content) {
         const cmd = extractExecveCommand(ev.args, ev.syscall);
         if (!cmd || SAFE_PROCESSES.has(path.basename(cmd.path))) break;
         const key = `${ev.tgid}:${cmd.path}`;
-        if (!procs.has(key)) procs.set(key, { command: cmd.path, pid: ev.tgid });
+        if (!procs.has(key)) {
+          procs.set(key, {
+            command: cmd.path, pid: ev.tgid,
+            launcher: describeLauncher(execAt(ev.tgid, index)),
+            argv: (cmd.argv || []).slice(0, ARGV_KEPT).map(a => String(a).slice(0, ARG_KEPT_LEN))
+          });
+        }
         break;
       }
     }
