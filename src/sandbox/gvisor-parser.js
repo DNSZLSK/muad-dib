@@ -58,7 +58,16 @@ function gvisorLogDir() {
 // without them the scope is unknown and the run is reported as unusable, not clean.
 // ══════════════════════════════════════════════════════════════
 
-const SENSITIVE_PATTERN = /\.npmrc|\.ssh\/|\.aws\/|\.env(?:$|[^a-zA-Z])|\/etc\/passwd|\/etc\/shadow|\.gitconfig|\.bash_history/;
+// `.env` must start a path component (.env, .env.local): process.env.js is a module, not
+// a dotenv file.
+const SENSITIVE_PATTERN = /\.npmrc|\.ssh\/|\.aws\/|(?:^|\/)\.env(?:$|[^a-zA-Z])|\/etc\/passwd|\/etc\/shadow|\.gitconfig|\.bash_history/;
+
+// The root npm writes every file of every package it installs (tarball extraction, in its
+// own process). A sensitive-looking name it writes under node_modules is a published file,
+// not package behavior; package code writes from install-script processes, and an npm an
+// install script starts is not the root npm. The path is normalized first, so a
+// node_modules/../ path does not get the exemption.
+const isRootNpmExtraction = (p) => path.posix.normalize(p).includes('/node_modules/');
 
 // What ran a process, for review: the image that ran just before its exec (the process
 // itself before an in-place exec, else its parent), with the script for an interpreter,
@@ -393,7 +402,9 @@ function parseGvisorStrace(content) {
       case 'open': {
         const info = extractOpenatPath(ev.args, ev.syscall);
         if (!info || !SENSITIVE_PATTERN.test(info.path)) break;
-        if (/O_WRONLY|O_RDWR|O_CREAT/.test(info.flags)) writes.add(info.path);
+        if (/O_WRONLY|O_RDWR|O_CREAT/.test(info.flags)) {
+          if (!(rootNpm.has(ev.tgid) && isRootNpmExtraction(info.path))) writes.add(info.path);
+        }
         else if (!(rootNpm.has(ev.tgid) && /(?:^|\/)(?:\.?npmrc|\.gitconfig)$/.test(info.path))) reads.add(info.path);
         break;
       }
