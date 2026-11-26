@@ -1,0 +1,128 @@
+{
+  "capturedAt": "2026-11-26T07:50:26.314Z",
+  "source": "registry.npmjs.org",
+  "redaction": "e-mail addresses replaced by user@example.invalid",
+  "fixtures": [
+    {
+      "category": "established_new_version",
+      "name": "@wix/site-service-editor-context",
+      "file": "wix__site-service-editor-context--established_new_version.json.gz",
+      "rawBytes": 34605,
+      "sha256Original": "5574c58ef5a69d7f488a546464c59f2c67d63f2abd8b916e292256912bee8ac2",
+      "version": "1.0.9",
+      "versions": 9
+    },
+    {
+      "category": "large_document",
+      "name": "cezar-cli",
+      "file": "cezar-cli--large_document.json.gz",
+      "rawBytes": 5057503,
+      "sha256Original": "a7dcb3ef54a462ab4c4c72b870401c30da9828c63899140dfdbaef669953bfea",
+      "version": "0.20.0-pr2412.6049",
+      "versions": 2576
+    },
+    {
+      "category": "large_document_abbreviated",
+      "name": "cezar-cli",
+      "file": "cezar-cli--abbreviated.json.gz",
+      "rawBytes": 2554367,
+      "sha256Original": "1e5cffcecb576aee12af8d6ba2495549d647f7f00240e31727c6c5c85b0da442",
+      "note": "install-v1 document: no time field"
+    },
+    {
+      "category": "large_document_version",
+      "name": "cezar-cli",
+      "file": "cezar-cli--version-0.20.0.json.gz",
+      "rawBytes": 1855,
+      "sha256Original": "325e30fa9a1bf026d501afb2fb62f51a5dd351cf82c11923eb621cd2ae1a1817",
+      "version": "0.20.0"
+    },
+    {
+      "category": "unpublished_version",
+      "name": "ts-vibe",
+      "file": "ts-vibe--unpublished_version.json.gz",
+      "rawBytes": 25659,
+      "sha256Original": "9d95f808b4191f02b5ca39cd9a4fb3b8456746076ddbe7aaa2e4b04bdab528aa",
+      "version": "2.5.1",
+      "unpublished": "2.0.0"
+    },
+    {
+      "category": "oidc_trusted_publisher",
+      "name": "@hyperneo/hyperneod-darwin-x64",
+      "file": "hyperneo__hyperneod-darwin-x64--oidc_trusted_publisher.json.gz",
+      "rawBytes": 49154,
+      "sha256Original": "698aef6ab872f33871af4e61d0fad04d3954f6371bf536745f339df8d235caf6",
+      "version": "0.62.1",
+      "trustedPublisher": {
+        "id": "github",
+        "oidcConfigId": "db24621b-cff9-409c-a5c6-29613faf6d53"
+      }
+    },
+    {
+      "category": "prerelease_not_latest",
+      "name": "@frondruntime/react",
+      "file": "frondruntime__react--prerelease_not_latest.json.gz",
+      "rawBytes": 38347,
+      "sha256Original": "009e99a548b0d3340549c8f2055da8f76ee69d243b7062058df8a00992c32ab8",
+      "version": "0.7.0-rc.0",
+      "latest": "0.7.0"
+    },
+    {
+      "category": "hook_added",
+      "name": "@jayfong/x-server",
+      "file": "jayfong__x-server--hook_added.json.gz",
+      "rawBytes": 1460751,
+      "sha256Original": "36580ea68f57a53ff1f014934584318bbc8dda15f7538e9e241ad3552a2d00e1",
+      "version": "3.15.0",
+      "transition": {
+        "kind": "added",
+        "hook": "preinstall",
+        "from": "2.30.0",
+        "to": "2.30.1"
+      }
+    },
+    {
+      "category": "first_publish",
+      "name": "@codeo-engineering/licenserail",
+      "file": "codeo-engineering__licenserail--first_publish.json.gz",
+      "rawBytes": 1551,
+      "sha256Original": "a655fb1bcb36b691d06bc12dbe39fbb75b6961c6ebb7bc848e4f080f5bc57583",
+      "note": "single version, from the registry changes feed"
+    },
+    {
+      "category": "hook_changed",
+      "name": "bcrypt",
+      "file": "bcrypt--hook_changed.json.gz",
+      "rawBytes": 205407,
+      "sha256Original": "1eb6c1ada5a43edf2e2fffce66cdaf3043e0000a52640a46bea297a8221d1834",
+      "transition": {
+        "kind": "changed",
+        "hook": "install",
+        "from": "5.1.1",
+        "to": "6.0.0"
+      }
+    },
+    {
+      "category": "hook_added_established",
+      "name": "es5-ext",
+      "file": "es5-ext--hook_added_established.json.gz",
+      "rawBytes": 221731,
+      "sha256Original": "132bd2407ae5bac682a9ed43b0492c0a4d2ad36f1ac43c86565b025a0abc633f",
+      "transition": {
+        "kind": "added",
+        "hook": "postinstall",
+        "from": "0.10.53",
+        "to": "0.10.54"
+      }
+    },
+    {
+      "category": "date_order_differs_from_semver",
+      "name": "protobufjs",
+      "file": "protobufjs--date_order.json.gz",
+      "rawBytes": 785614,
+      "sha256Original": "a3952b6d5649fc7f6ac21aa3417808e73d2bf297ebada33a64d5c8f463cb7cdc",
+      "note": "5.0.2 published after 6.6.1: previous version by date is not the semver predecessor"
+    }
+  ],
+  "supplementedAt": "2026-11-26T07:52:16.669Z"
+}
