@@ -337,6 +337,33 @@ async function runNpmRegistryTests() {
       limiter.resetLimiter();
     }
   });
+
+  // Characterization: the registry document's time map carries two document timestamps,
+  // `created` (written just before the first version) and `modified`. getPackageMetadata
+  // keeps only version keys, which is what lets isFirstPublishedVersion recognize the
+  // first version. Real document: tests/samples/registry/.
+  await asyncTest('REGISTRY: time keeps only version keys, so the first version is recognized', async () => {
+    const zlib = require('zlib');
+    const fs = require('fs');
+    const path = require('path');
+    const { isFirstPublishedVersion } = require('../../src/ml/feature-extractor.js');
+    const doc = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '..', 'samples', 'registry', 'es5-ext--hook_added_established.json.gz'))).toString('utf8'));
+    const first = '0.1.0';
+    assert(Date.parse(doc.time.created) < Date.parse(doc.time[first]), 'fixture precondition: time.created precedes the first version');
+    assert(isFirstPublishedVersion({ time: doc.time, registry_version: first }) === false, 'precondition: the raw time map hides the first version');
+    const mockFetch = async (url) => {
+      if (url.includes('/-/v1/search')) return { ok: true, status: 200, json: async () => ({ total: 1 }), headers: new Map() };
+      if (url.includes('api.npmjs.org/downloads')) return { ok: true, status: 200, json: async () => ({ downloads: 0 }), headers: new Map() };
+      return { ok: true, status: 200, json: async () => doc, headers: new Map() };
+    };
+    await withMockedFetch(mockFetch, async (getPackageMetadata) => {
+      const meta = await getPackageMetadata('es5-ext');
+      assert(meta && meta.time, 'metadata with a time map');
+      assert(!('created' in meta.time) && !('modified' in meta.time), 'time keys: ' + Object.keys(meta.time).filter(k => !/^\d/.test(k)).join(','));
+      assert(isFirstPublishedVersion({ time: meta.time, registry_version: first }) === true, 'first version recognized');
+      assert(isFirstPublishedVersion({ time: meta.time, registry_version: '0.10.54' }) === false, 'a later version is not first');
+    });
+  });
 }
 
 module.exports = { runNpmRegistryTests };
