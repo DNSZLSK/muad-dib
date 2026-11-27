@@ -89,6 +89,11 @@ async function runAgainstTestImage() {
       assert(/Installing is-number@7\.0\.0/.test(reg.stderr || ''), 'the runner must install the exact version passed by the host');
     });
 
+    await asyncTest('SANDBOX-E2E: building the report raises no file error (logs owned by the sandbox user)', async () => {
+      const errs = String(reg.stderr || '').split('\n').filter(l => /cannot touch|can't open \/tmp\//.test(l));
+      assert(errs.length === 0, 'runner file errors: ' + errs.join(' / '));
+    });
+
     // An ESM-only package that declares only "exports" (no "main"): loading it by absolute
     // path ignored "exports" (MODULE_NOT_FOUND), so its code never ran.
     const esmArgs = buildDockerArgs({

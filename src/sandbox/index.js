@@ -171,8 +171,8 @@ function inconclusiveResult(detail, evidence) {
  * a report, unreadable report, docker launch error): nothing was observed, so the run is not
  * CLEAN. One journal line per run, in the same format as the other incomplete runs.
  */
-function unusableRunResult(kind, reason, evidence) {
-  console.log(`[SANDBOX] INCONCLUSIVE run: ${kind} - ${reason} | evidence: ${oneLine(evidence, 200)}`);
+function unusableRunResult(kind, reason, evidence, label) {
+  console.log(`[SANDBOX] INCONCLUSIVE run: ${kind} - ${reason} | package: ${label} | evidence: ${oneLine(evidence, 200)}`);
   return {
     score: -1,
     severity: 'INCONCLUSIVE',
@@ -627,6 +627,8 @@ async function runSingleSandbox(packageName, options = {}) {
   if (version && !isSafeVersion(version)) {
     return inconclusiveResult(`Invalid version string, sandbox not run: ${String(version).slice(0, 40)}`);
   }
+  // Several sandboxes run in parallel: each result line names its package.
+  const runLabel = oneLine(version ? `${displayName}@${version}` : displayName, 120);
   const timeOffset = options.timeOffset || 0;
   const runTimeout = options.runTimeout || CONTAINER_TIMEOUT;
   const gvisorMode = options.gvisor || false;
@@ -760,7 +762,7 @@ async function runSingleSandbox(packageName, options = {}) {
         } else {
           console.log(`[SANDBOX] Container exited with code ${code} (no output)`);
         }
-        resolve(unusableRunResult('container_exit', `Container exited with code ${code} without a report`, errLines[0] || 'no output'));
+        resolve(unusableRunResult('container_exit', `Container exited with code ${code} without a report`, errLines[0] || 'no output', runLabel));
         return;
       }
 
@@ -814,7 +816,7 @@ async function runSingleSandbox(packageName, options = {}) {
           // No delimiter at all — show what's in stdout
           console.log('[SANDBOX] DEBUG no delimiter found, stdout preview:', stdout.substring(0, 500));
         }
-        resolve(unusableRunResult('report_unreadable', `Sandbox report unreadable (exit ${code})`, e.message));
+        resolve(unusableRunResult('report_unreadable', `Sandbox report unreadable (exit ${code})`, e.message, runLabel));
         return;
       }
 
@@ -942,7 +944,7 @@ async function runSingleSandbox(packageName, options = {}) {
         const incomplete = incompleteRunReasons(report, { telemetryMissing: gvisorTelemetryMissing, telemetryUnusable: gvisorTelemetryUnusable });
         if (incomplete) {
           // One line per run (the warnings above are printed once per process).
-          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')} | evidence: ${oneLine(incomplete.evidence, 200)}`);
+          console.log(`[SANDBOX] INCONCLUSIVE run: ${incomplete.kinds.join(',')} - ${incomplete.reasons.join('; ')} | package: ${runLabel} | evidence: ${oneLine(incomplete.evidence, 200)}`);
           findings.push({
             type: 'sandbox_incomplete',
             severity: 'MEDIUM',
@@ -961,7 +963,7 @@ async function runSingleSandbox(packageName, options = {}) {
       const result = { score: finalScore, severity, findings, raw_report: report, suspicious: finalScore > 0 };
       // One line per run with a positive score: the findings were kept nowhere but in the
       // follow-up webhook (top 5), so a sandbox-driven alert could not be reviewed from the host.
-      if (finalScore > 0) console.log(`[SANDBOX] Run result: score=${finalScore} severity=${severity} findings: ${formatSandboxFindings(findings)}`);
+      if (finalScore > 0) console.log(`[SANDBOX] Run result: package=${runLabel} score=${finalScore} severity=${severity} findings: ${formatSandboxFindings(findings)}`);
 
       resolve(result);
     });
@@ -973,7 +975,7 @@ async function runSingleSandbox(packageName, options = {}) {
       } else {
         console.log(`[SANDBOX] Error: ${err.message}`);
       }
-      resolve(unusableRunResult('docker_error', `Docker launch error (${err.code || 'error'})`, err.message));
+      resolve(unusableRunResult('docker_error', `Docker launch error (${err.code || 'error'})`, err.message, runLabel));
     });
   });
 }

@@ -539,13 +539,16 @@ fi
 # ── 11. Build JSON with jq ──
 echo "[SANDBOX] Building report..." >&2
 
-# Ensure all temp files exist
-touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
+# Ensure all temp files exist. Create only the missing ones: the logs written by sandboxuser
+# exist already, and root here has no capability to update a file it does not own.
+for f in /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
   /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
   /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
   /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
-  /tmp/preload.log /tmp/safe-dns-queries.txt
+  /tmp/preload.log /tmp/safe-dns-queries.txt /tmp/safe-dns-resolutions.txt; do
+  [ -e "$f" ] || : > "$f"
+done
 
 # ── Pre-bake all data as JSON files ──
 # Previous approach passed all data via --arg/--argjson on the jq CLI.

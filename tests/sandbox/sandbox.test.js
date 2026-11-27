@@ -1442,8 +1442,10 @@ async function runSandboxTests() {
     const cp = require('child_process');
     const modPath = require.resolve('../../src/sandbox/index.js');
 
-    async function runWithFakeDocker(behave) {
+    async function runWithFakeDocker(behave, opts = {}) {
       const realSpawn = cp.spawn;
+      const realLog = console.log;
+      if (opts.lines) console.log = (...a) => { opts.lines.push(a.join(' ')); };
       cp.spawn = (cmd, args, opts) => {
         if (cmd !== 'docker' || !Array.isArray(args) || args[0] !== 'run') return realSpawn(cmd, args, opts);
         const p = new EventEmitter();
@@ -1456,8 +1458,9 @@ async function runSandboxTests() {
       delete require.cache[modPath];
       try {
         const { runSingleSandbox } = require(modPath);
-        return await runSingleSandbox('left-pad', { runTimeout: 10000 });
+        return await runSingleSandbox('left-pad', { runTimeout: 10000, version: opts.version });
       } finally {
+        console.log = realLog;
         cp.spawn = realSpawn;
         delete require.cache[modPath];
       }
@@ -1486,6 +1489,36 @@ async function runSandboxTests() {
     await asyncTest('SANDBOX-RUN: a complete report with nothing observed stays CLEAN', async () => {
       const r = await runWithFakeDocker((p) => { p.stdout.emit('data', Buffer.from('---MUADDIB-REPORT-START---\n' + EMPTY_REPORT + '\n')); p.emit('close', 0); });
       assert(r.severity === 'CLEAN' && r.score === 0 && !r.inconclusive, 'expected CLEAN, got ' + r.severity + ' score ' + r.score + ' ' + JSON.stringify(r.findings));
+    });
+
+    // Up to 7 sandboxes run in parallel: each result line names its package and version.
+    const reportWith = (patch) => JSON.stringify(Object.assign(JSON.parse(EMPTY_REPORT), patch));
+    const lineOf = (lines, re) => lines.find(l => re.test(l)) || '';
+
+    await asyncTest('SANDBOX-LOG: the run result line names the package and version', async () => {
+      const lines = [];
+      const report = reportWith({ processes: { spawned: [{ command: '/usr/bin/curl', pid: 7 }] } });
+      const r = await runWithFakeDocker((p) => { p.stdout.emit('data', Buffer.from('---MUADDIB-REPORT-START---\n' + report + '\n')); p.emit('close', 0); }, { lines, version: '1.3.0' });
+      assert(r.score > 0, 'precondition: a positive score, got ' + r.score);
+      const line = lineOf(lines, /\[SANDBOX\] Run result:/);
+      assert(/\[SANDBOX\] Run result: package=left-pad@1\.3\.0 score=\d+/.test(line), 'line: ' + line);
+    });
+
+    await asyncTest('SANDBOX-LOG: a container that dies without a report logs its package and exit code', async () => {
+      const lines = [];
+      await runWithFakeDocker((p) => p.emit('close', 137), { lines, version: '1.3.0' });
+      const line = lineOf(lines, /INCONCLUSIVE run:/);
+      assert(/\[SANDBOX\] INCONCLUSIVE run: ([a-z_,]+)/.exec(line)?.[1] === 'container_exit', 'the reason code stays first (load counts): ' + line);
+      assert(/code 137/.test(line) && /\| package: left-pad@1\.3\.0 \| evidence:/.test(line), 'line: ' + line);
+    });
+
+    await asyncTest('SANDBOX-LOG: an incomplete run names its package before the evidence the package chose', async () => {
+      const lines = [];
+      const report = reportWith({ exit_code: 1, install_output: 'npm error | package: forged@9.9.9' });
+      await runWithFakeDocker((p) => { p.stdout.emit('data', Buffer.from('---MUADDIB-REPORT-START---\n' + report + '\n')); p.emit('close', 0); }, { lines, version: '1.3.0' });
+      const line = lineOf(lines, /INCONCLUSIVE run:/);
+      const real = line.indexOf('package: left-pad@1.3.0');
+      assert(real > 0 && real < line.indexOf('forged'), 'the real package comes first: ' + line);
     });
   }
 }
