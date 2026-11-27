@@ -166,6 +166,23 @@ function inconclusiveResult(detail, evidence) {
   };
 }
 
+/**
+ * INCONCLUSIVE result for a run that ended without a usable report (container exit without
+ * a report, unreadable report, docker launch error): nothing was observed, so the run is not
+ * CLEAN. One journal line per run, in the same format as the other incomplete runs.
+ */
+function unusableRunResult(kind, reason, evidence) {
+  console.log(`[SANDBOX] INCONCLUSIVE run: ${kind} - ${reason} | evidence: ${oneLine(evidence, 200)}`);
+  return {
+    score: -1,
+    severity: 'INCONCLUSIVE',
+    findings: [{ type: 'sandbox_incomplete', severity: 'MEDIUM', detail: `${reason} - behavioral analysis incomplete`, evidence: oneLine(evidence, 300) }],
+    raw_report: null,
+    suspicious: false,
+    inconclusive: true
+  };
+}
+
 // ── Journal lines for sandbox results ──
 // Finding details and evidence carry strings the analyzed package chose (paths, hosts,
 // request bodies): control characters become spaces so one result is one journal line.
@@ -600,8 +617,6 @@ function generateFakeHostname() {
 // ── Run single sandbox execution ──
 
 async function runSingleSandbox(packageName, options = {}) {
-  const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
-
   const strict = options.strict || false;
   const canaryTokens = options.canaryTokens || null;
   const local = options.local || false;
@@ -737,7 +752,7 @@ async function runSingleSandbox(packageName, options = {}) {
         return;
       }
 
-      // Docker-level failure (non-timeout): log error and return clean result
+      // Docker-level failure (non-timeout): the container exited without a report.
       if (code !== 0 && !stdout.includes('---MUADDIB-REPORT-START---')) {
         const errLines = stderr.split(/\r?\n/).filter(l => l && !l.includes('[SANDBOX]'));
         if (errLines.length > 0) {
@@ -745,7 +760,7 @@ async function runSingleSandbox(packageName, options = {}) {
         } else {
           console.log(`[SANDBOX] Container exited with code ${code} (no output)`);
         }
-        resolve(cleanResult);
+        resolve(unusableRunResult('container_exit', `Container exited with code ${code} without a report`, errLines[0] || 'no output'));
         return;
       }
 
@@ -799,7 +814,7 @@ async function runSingleSandbox(packageName, options = {}) {
           // No delimiter at all — show what's in stdout
           console.log('[SANDBOX] DEBUG no delimiter found, stdout preview:', stdout.substring(0, 500));
         }
-        resolve(cleanResult);
+        resolve(unusableRunResult('report_unreadable', `Sandbox report unreadable (exit ${code})`, e.message));
         return;
       }
 
@@ -958,7 +973,7 @@ async function runSingleSandbox(packageName, options = {}) {
       } else {
         console.log(`[SANDBOX] Error: ${err.message}`);
       }
-      resolve(cleanResult);
+      resolve(unusableRunResult('docker_error', `Docker launch error (${err.code || 'error'})`, err.message));
     });
   });
 }
