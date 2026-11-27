@@ -41,7 +41,22 @@ const CHECKS = {
   large_document: (d, e, raw) => raw.length > 2 * 1024 * 1024 ? null : `expected more than 2 MiB, got ${raw.length}`,
   large_document_abbreviated: (d) => (!('time' in d) && d.versions && Object.keys(d.versions).length > 0) ? null : 'expected an install-v1 document: versions, no time',
   large_document_version: (d, e) => (d.version === e.version && !('versions' in d)) ? null : `expected the single-version document of ${e.version}`,
-  date_order_differs_from_semver: (d) => Date.parse(d.time['5.0.2']) > Date.parse(d.time['6.6.1']) ? null : 'expected 5.0.2 published after 6.6.1'
+  date_order_differs_from_semver: (d) => Date.parse(d.time['5.0.2']) > Date.parse(d.time['6.6.1']) ? null : 'expected 5.0.2 published after 6.6.1',
+  tied_times: (d) => {
+    const t = Object.keys(d.versions || {}).map(v => d.time && d.time[v]).filter(Boolean);
+    return t.length - new Set(t).size > 0 ? null : 'expected versions sharing a publish timestamp';
+  },
+  // The fallback of the metadata lane reads the previous version from the key order of the
+  // abbreviated document: that order must be the publish order of the full document.
+  tied_times_abbreviated: (d, e) => {
+    if ('time' in d) return 'expected an install-v1 document: no time';
+    const full = load(e.full).doc;
+    const inFull = Object.keys(full.versions).filter(v => full.time[v]);
+    const byTime = inFull.map((v, i) => ({ v, i, t: Date.parse(full.time[v]) })).sort((a, b) => a.t - b.t || a.i - b.i).map(x => x.v);
+    const keep = new Set(byTime);
+    const abbr = Object.keys(d.versions).filter(v => keep.has(v));
+    return JSON.stringify(abbr) === JSON.stringify(byTime) ? null : 'abbreviated version order differs from the publish order of ' + e.full;
+  }
 };
 CHECKS.hook_added_established = CHECKS.hook_added;
 

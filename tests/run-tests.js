@@ -123,6 +123,7 @@ const { runPreloadTests } = require('./unit/preload.test');
 const { runSandboxSafeDomainsTests } = require('./unit/sandbox-safe-domains.test');
 const { runRegistryFixturesTests } = require('./unit/registry-fixtures.test');
 const { runMetadataLaneExtractTests } = require('./unit/metadata-lane-extract.test');
+const { runMetadataLaneFetchTests } = require('./unit/metadata-lane-fetch.test');
 const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroboration.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runFpCapVetoTests } = require('./unit/fp-cap-vetoes.test');
@@ -298,6 +299,7 @@ async function timed(name, fn) {
   await timed('sandbox-safe-domains', runSandboxSafeDomainsTests);
   await timed('registry-fixtures', runRegistryFixturesTests);
   await timed('metadata-lane-extract', runMetadataLaneExtractTests);
+  await timed('metadata-lane-fetch', runMetadataLaneFetchTests);
   await timed('string-ioc-corroboration', runStringIocCorroborationTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
   await timed('sandbox-runner-e2e', runSandboxRunnerE2ETests);
