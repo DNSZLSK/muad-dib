@@ -122,7 +122,43 @@
       "rawBytes": 785614,
       "sha256Original": "a3952b6d5649fc7f6ac21aa3417808e73d2bf297ebada33a64d5c8f463cb7cdc",
       "note": "5.0.2 published after 6.6.1: previous version by date is not the semver predecessor"
+    },
+    {
+      "category": "tied_times",
+      "name": "coffee-script",
+      "file": "coffee-script--tied_times.json.gz",
+      "rawBytes": 74177,
+      "sha256Original": "f681bd9e4436b22aea3050b045e886efd023667886ec5993a3be1718e7749488",
+      "versions": 45,
+      "tiedTimestamps": 10
+    },
+    {
+      "category": "tied_times_abbreviated",
+      "name": "coffee-script",
+      "file": "coffee-script--abbreviated.json.gz",
+      "rawBytes": 33883,
+      "sha256Original": "22a582273845efa827a4ca54845400a04d54d824ec9ae155fdffdd9afaaaad0a",
+      "full": "coffee-script--tied_times.json.gz",
+      "note": "install-v1 document: no time field; version keys in publish order"
+    },
+    {
+      "category": "tied_times",
+      "name": "underscore",
+      "file": "underscore--tied_times.json.gz",
+      "rawBytes": 160144,
+      "sha256Original": "dcc8153c182d10ddec8850bca234ff5957f9869771fb87dfe041d2b044269b9d",
+      "versions": 55,
+      "tiedTimestamps": 12
+    },
+    {
+      "category": "tied_times_abbreviated",
+      "name": "underscore",
+      "file": "underscore--abbreviated.json.gz",
+      "rawBytes": 54625,
+      "sha256Original": "201da52ad83397a1682d4da76a7959d98c24d7e38c7de4584d686efe91fba0f3",
+      "full": "underscore--tied_times.json.gz",
+      "note": "install-v1 document: no time field; version keys in publish order"
     }
   ],
-  "supplementedAt": "2026-11-26T07:52:16.669Z"
+  "supplementedAt": "2026-11-27T20:54:41.040Z"
 }

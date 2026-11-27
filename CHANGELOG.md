@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Metadata lane: publish facts fetched with bounded reads (`src/monitor/metadata-lane/fetch.js`).** The full registry document is read up to 2 MiB; over that, the abbreviated document (up to 8 MiB) gives the version list in publish order and the single-version documents give publisher and install hooks, with no date guessed. Every request holds a registry slot; a 429 backs the registry off and is not retried. A status other than ok carries no facts, and the caller must treat the package as unknown. Documents over 1 MiB and documents too large to read are logged. Not wired into the monitor yet. Tests on real registry documents, including two packages with versions published at the same timestamp, and a local server for the byte cap.
+
 - **Metadata lane: publish facts from a registry document (`src/monitor/metadata-lane/extract.js`).** For each recent version: publisher, OIDC trusted publishing, first publish, previous version by publish date, not-latest, and install hooks added or changed against the previous version. Pure function, bounded output, not wired into the monitor yet. Tests on real registry documents.
 
 - **Real npm registry documents for the monitor metadata lane (`tests/samples/registry/`, `tests/unit/registry-fixtures.test.js`).** Frozen documents covering a first publish, a new version of an established package, OIDC trusted publishing, a prerelease, install hooks added or changed between versions, an unpublished version, versions published out of semver order, and a large document with its abbreviated and single-version forms. E-mail addresses are replaced. A test checks each document has the property it was chosen for.

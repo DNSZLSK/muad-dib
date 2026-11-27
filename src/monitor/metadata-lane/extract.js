@@ -75,6 +75,8 @@ function extractPublishFacts(doc, opts = {}) {
       name,
       version,
       publishedAt: t,
+      publishTimeSource: 'registry',
+      previousPublishedAt: i > 0 ? ordered[i - 1].t : null,
       ...publisherOf(manifest),
       firstPublish: prev === null,
       notLatest: latest !== version,
@@ -85,4 +87,33 @@ function extractPublishFacts(doc, opts = {}) {
   return facts;
 }
 
-module.exports = { extractPublishFacts, HOOKS };
+/**
+ * The fact of one version when only the abbreviated document (version list in publish order,
+ * dist-tags, no dates) and the single-version documents are available. No date is guessed:
+ * publishedAt and previousPublishedAt are null; approximate times are kept with their source.
+ * @param {{ name: string, version: string, versionOrder: string[], distTags: object,
+ *   manifest: object, prevManifest: object|null, approxPublishTimes?: Array<{at, source}> }} p
+ * @returns {object|null} null when the version is not in versionOrder
+ */
+function factFromVersionDocs(p) {
+  const order = Array.isArray(p.versionOrder) ? p.versionOrder : [];
+  const i = order.indexOf(p.version);
+  if (i < 0) return null;
+  const prev = i > 0 ? order[i - 1] : null;
+  const distTags = isObject(p.distTags) ? p.distTags : {};
+  return {
+    name: p.name,
+    version: p.version,
+    publishedAt: null,
+    publishTimeSource: null,
+    previousPublishedAt: null,
+    approxPublishTimes: Array.isArray(p.approxPublishTimes) ? p.approxPublishTimes : [],
+    ...publisherOf(p.manifest),
+    firstPublish: prev === null,
+    notLatest: (typeof distTags.latest === 'string' ? distTags.latest : null) !== p.version,
+    previousVersion: prev,
+    hookChanges: hookChanges(prev === null ? null : p.prevManifest, p.manifest)
+  };
+}
+
+module.exports = { extractPublishFacts, factFromVersionDocs, HOOKS };
