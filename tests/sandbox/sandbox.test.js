@@ -1434,6 +1434,60 @@ async function runSandboxTests() {
       assert(f.type === 'timeout' && /All 2 runs exceeded timeout/.test(f.detail), 'got ' + JSON.stringify(f));
     });
   }
+
+  // A run that ends without a usable report observed nothing: INCONCLUSIVE, never CLEAN.
+  // `docker run` is simulated (child_process.spawn replaced before the module is loaded).
+  {
+    const { EventEmitter } = require('events');
+    const cp = require('child_process');
+    const modPath = require.resolve('../../src/sandbox/index.js');
+
+    async function runWithFakeDocker(behave) {
+      const realSpawn = cp.spawn;
+      cp.spawn = (cmd, args, opts) => {
+        if (cmd !== 'docker' || !Array.isArray(args) || args[0] !== 'run') return realSpawn(cmd, args, opts);
+        const p = new EventEmitter();
+        p.stdout = new EventEmitter();
+        p.stderr = new EventEmitter();
+        p.kill = () => true;
+        setImmediate(() => behave(p));
+        return p;
+      };
+      delete require.cache[modPath];
+      try {
+        const { runSingleSandbox } = require(modPath);
+        return await runSingleSandbox('left-pad', { runTimeout: 10000 });
+      } finally {
+        cp.spawn = realSpawn;
+        delete require.cache[modPath];
+      }
+    }
+    const reasonOf = (r) => ((r.findings || []).find(f => f.type === 'sandbox_incomplete') || {}).detail || '';
+    const EMPTY_REPORT = '{"package":"left-pad","timestamp":"t","mode":"permissive","duration_ms":1,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"safe_dns_queries":[],"dns_resolutions":[],"safe_dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":0,"mock_network":{"started":true,"dns_in_path":true}}';
+
+    await asyncTest('SANDBOX-RUN: a container that exits without a report is INCONCLUSIVE with its exit code', async () => {
+      const r = await runWithFakeDocker((p) => p.emit('close', 137));
+      assert(r.inconclusive === true && r.severity === 'INCONCLUSIVE' && r.score === -1, 'expected INCONCLUSIVE, got ' + r.severity + ' score ' + r.score);
+      assert(/code 137/.test(reasonOf(r)) && /without a report/.test(reasonOf(r)), 'reason: ' + reasonOf(r));
+    });
+
+    await asyncTest('SANDBOX-RUN: an unreadable report is INCONCLUSIVE', async () => {
+      const r = await runWithFakeDocker((p) => { p.stdout.emit('data', Buffer.from('---MUADDIB-REPORT-START---\n{"package":')); p.emit('close', 0); });
+      assert(r.inconclusive === true && r.severity === 'INCONCLUSIVE', 'expected INCONCLUSIVE, got ' + r.severity + ' score ' + r.score);
+      assert(/report unreadable/i.test(reasonOf(r)), 'reason: ' + reasonOf(r));
+    });
+
+    await asyncTest('SANDBOX-RUN: a docker launch error is INCONCLUSIVE', async () => {
+      const r = await runWithFakeDocker((p) => p.emit('error', Object.assign(new Error('spawn docker ENOENT'), { code: 'ENOENT' })));
+      assert(r.inconclusive === true && r.severity === 'INCONCLUSIVE', 'expected INCONCLUSIVE, got ' + r.severity + ' score ' + r.score);
+      assert(/docker launch error/i.test(reasonOf(r)), 'reason: ' + reasonOf(r));
+    });
+
+    await asyncTest('SANDBOX-RUN: a complete report with nothing observed stays CLEAN', async () => {
+      const r = await runWithFakeDocker((p) => { p.stdout.emit('data', Buffer.from('---MUADDIB-REPORT-START---\n' + EMPTY_REPORT + '\n')); p.emit('close', 0); });
+      assert(r.severity === 'CLEAN' && r.score === 0 && !r.inconclusive, 'expected CLEAN, got ' + r.severity + ' score ' + r.score + ' ' + JSON.stringify(r.findings));
+    });
+  }
 }
 
 module.exports = { runSandboxTests };
