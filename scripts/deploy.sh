@@ -38,10 +38,18 @@ if [ -f scripts/fix-permissions.sh ]; then
   bash scripts/fix-permissions.sh
 fi
 
-# Rebuild sandbox only if docker/ files changed since pre-pull
-if git diff "$PRE_PULL_HEAD" --name-only | grep -q "^docker/"; then
-  echo "[deploy] Sandbox files changed, rebuilding..."
-  sudo docker build -t muaddib-sandbox docker/
+# Sandbox image: same build path as auto-update. Rebuilt when docker/ differs from the image
+# label (or the image has no label); the replaced image is kept as muaddib-sandbox:previous.
+# A failed build stops the deploy before the restart, so new host code never runs with an
+# image built from an older docker/.
+IMAGE_LOG=$(mktemp)
+IMAGE_RC=0
+sudo bash deploy/refresh-sandbox-image.sh "$MUADDIB_DIR" "$IMAGE_LOG" || IMAGE_RC=$?
+sed 's/^/[deploy] /' "$IMAGE_LOG"
+rm -f "$IMAGE_LOG"
+if [ "$IMAGE_RC" -ne 0 ]; then
+  echo "[deploy] ERROR: sandbox image build failed - current image kept, monitor not restarted"
+  exit 1
 fi
 
 # Install deps if package-lock changed
