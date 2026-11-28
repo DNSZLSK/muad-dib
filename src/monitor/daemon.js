@@ -34,7 +34,7 @@ const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adapt
 const { startHealthcheck } = require('./healthcheck.js');
 const { startLagSampler, runInstrumented } = require('./event-loop-monitor.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
-const { evictFromScanQueueBulk, enqueueScan } = require('./scan-queue.js');
+const { evictFromScanQueueBulk, enqueueScan, registerRestoredQueue } = require('./scan-queue.js');
 const { isSpillEnabled, shouldDrain, drainBacklog, getBacklogSize } = require('./spill.js');
 const { startGhsaPoller, stopGhsaPoller } = require('../ioc/ghsa-poller.js');
 const { cleanupOldArchives, getRetentionDays, startPeriodicCleanup } = require('./tarball-archive.js');
@@ -344,6 +344,7 @@ function restoreQueue(scanQueue) {
       return 0;
     }
     scanQueue.push(...items);
+    registerRestoredQueue(scanQueue);
     console.log(`[MONITOR] Restored ${count} packages from queue state (saved at ${data.savedAt})`);
 
     // Delete after successful restore
