@@ -1710,6 +1710,72 @@ test('LEAN: lean entries merge into the matcher exactly like full entries', () =
   assert(opt.wildcardPackages.has('evilpkg'), 'lean wildcard entry indexed in wildcardPackages');
 });
 
+// The home cache (~/.muaddib/data/iocs.json) is read by every scan worker. The deep scrape
+// must write it in the same form as updateIOCs (compact entries, full objects only for
+// entries the compact file does not carry), never as a copy of the full database.
+function homeCacheFixture() {
+  const full = {
+    packages: [
+      { name: 'evil-wild', version: '*', severity: 'critical', source: 'osv', id: 'MAL-1', description: 'x'.repeat(500), references: ['https://a.example/1'] },
+      { name: 'evil-versioned', version: '1.2.3', severity: 'high', source: 'osv', id: 'MAL-2', description: 'y'.repeat(500) },
+      { name: 'osm-only', version: '*', severity: 'critical', source: 'osm', sources: [{ name: 'osm' }], description: 'z'.repeat(500) }
+    ],
+    pypi_packages: [
+      { name: 'evil-py', version: '*', severity: 'critical', source: 'osv', description: 'p'.repeat(500) }
+    ],
+    hashes: ['a'.repeat(64)],
+    markers: ['marker-1'],
+    files: ['evil-file.js'],
+    stringIocs: [{ string: 'evil-literal', severity: 'critical' }],
+    updated: '2026-11-28T00:00:00.000Z'
+  };
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  return { full, compact: generateCompactIOCs(full) };
+}
+
+test('HOME-CACHE: published entries take the compact form, without enrichment', () => {
+  const { createHomeCacheIOCs } = require('../../src/ioc/updater.js');
+  const { full, compact } = homeCacheFixture();
+  const home = createHomeCacheIOCs(full, compact);
+  const wild = home.packages.find(p => p.name === 'evil-wild');
+  assert(wild, 'published entry present');
+  assert(wild.description === undefined, 'published entry must not carry the enrichment');
+  assert(JSON.stringify(home).length < JSON.stringify(full).length, 'home cache must be smaller than the full database');
+});
+
+test('HOME-CACHE: no IOC of the full database is lost', () => {
+  const { createHomeCacheIOCs } = require('../../src/ioc/updater.js');
+  const { full, compact } = homeCacheFixture();
+  const home = createHomeCacheIOCs(full, compact);
+  const keys = new Set(home.packages.map(p => p.name + '@' + p.version));
+  for (const p of full.packages) assert(keys.has(p.name + '@' + p.version), 'npm IOC kept: ' + p.name);
+  const pyKeys = new Set(home.pypi_packages.map(p => p.name + '@' + p.version));
+  for (const p of full.pypi_packages) assert(pyKeys.has(p.name + '@' + p.version), 'PyPI IOC kept: ' + p.name);
+  assert(home.hashes.includes(full.hashes[0]), 'hash kept');
+  assert(home.markers.includes('marker-1'), 'marker kept');
+  assert(home.files.includes('evil-file.js'), 'file kept');
+  assert(home.stringIocs.some(s => s.string === 'evil-literal'), 'string IOC kept');
+});
+
+test('HOME-CACHE: a local-only entry keeps its sources and stays unpublished', () => {
+  const { createHomeCacheIOCs, isLocalOnlyIOC, generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const { full, compact } = homeCacheFixture();
+  const home = createHomeCacheIOCs(full, compact);
+  const osm = home.packages.find(p => p.name === 'osm-only');
+  assert(osm, 'local-only entry present');
+  assert(isLocalOnlyIOC(osm), 'local-only entry must keep the source information that marks it local-only');
+  const republished = generateCompactIOCs(home);
+  assert(!(republished.wildcards || []).includes('osm-only'), 'local-only entry must never enter the published compact file');
+});
+
+test('HOME-CACHE: internal dedup sets are not serialized', () => {
+  const { createHomeCacheIOCs } = require('../../src/ioc/updater.js');
+  const { full, compact } = homeCacheFixture();
+  const home = JSON.parse(JSON.stringify(createHomeCacheIOCs(full, compact)));
+  const internal = Object.keys(home).filter(k => k.startsWith('_'));
+  assert(internal.length === 0, 'no internal keys expected, got: ' + internal.join(','));
+});
+
 test('LEAN: ensureLeanIOCFile / writeLeanIOCFile are exported functions', () => {
   const u = require('../../src/ioc/updater.js');
   assert(typeof u.ensureLeanIOCFile === 'function', 'ensureLeanIOCFile exported');

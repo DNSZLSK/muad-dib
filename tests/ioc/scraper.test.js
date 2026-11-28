@@ -2576,7 +2576,8 @@ async function runScraperTests() {
     fs.renameSync = (from, to) => {
       const rf = path.resolve(from); const rt = path.resolve(to);
       if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
-      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
+      // The full local database only: the home cache (~/.muaddib) holds compact entries.
+      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && !to.includes('.muaddib') && mockFiles[rt]) {
         try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
       }
     };
@@ -2840,6 +2841,98 @@ async function runScraperTests() {
       // generateCompactIOCs creates wildcards array and versioned object
       assert(Array.isArray(compactData.wildcards) || typeof compactData.versioned === 'object',
         'Compact format should have wildcards or versioned fields');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+      process.stdout.write = origWrite;
+      Object.assign(fs, origFs);
+    }
+  });
+
+  // Every scan worker parses the home cache; a copy of the full pretty-printed database there
+  // costs about 1 GB of heap per worker until the next light refresh rewrites it.
+  await asyncTest('SCRAPER: runScraper writes the home cache in compact form with a matching HMAC', async () => {
+    const os = require('os');
+    const { verifyIOCHMAC } = require('../../src/ioc/updater.js');
+    const origRequest = https.request;
+    const origLog = console.log;
+    const origWrite = process.stdout.write;
+    const origFs = {
+      existsSync: fs.existsSync, readFileSync: fs.readFileSync, writeFileSync: fs.writeFileSync,
+      mkdirSync: fs.mkdirSync, statSync: fs.statSync, renameSync: fs.renameSync,
+      accessSync: fs.accessSync, copyFileSync: fs.copyFileSync
+    };
+    console.log = () => {};
+    process.stdout.write = () => true;
+
+    https.request = (options, callback) => {
+      const url = 'https://' + options.hostname + options.path;
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          res.headers = { 'content-length': '100' };
+          res.resume = () => {};
+          res.statusCode = 200;
+          callback(res);
+          if (url.includes('npm/all.zip') || url.includes('PyPI/all.zip')) {
+            const zip = new AdmZip();
+            zip.addFile('SKIP.json', Buffer.from('{}'));
+            res.emit('data', zip.toBuffer());
+          } else if (url.includes('gensecaihq')) {
+            res.emit('data', Buffer.from(JSON.stringify({
+              packages: [{ name: 'home-cache-pkg', affectedVersions: ['*'] }]
+            })));
+          } else if (url.includes('api.osv.dev')) {
+            res.emit('data', Buffer.from(JSON.stringify({ vulns: [] })));
+          } else if (url.includes('api.github.com')) {
+            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-home-test', tree: [] })));
+          } else {
+            res.emit('data', Buffer.from('h,v\n'));
+          }
+          res.emit('end');
+        });
+      };
+      return req;
+    };
+
+    const mockFiles = {};
+    fs.existsSync = (p) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
+      return true;
+    };
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
+      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-home-test';
+      return JSON.stringify({ packages: [], pypi_packages: [], hashes: [], markers: [], files: [] });
+    };
+    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
+    fs.copyFileSync = (from, to) => { mockFiles[path.resolve(to)] = mockFiles[path.resolve(from)]; };
+    fs.mkdirSync = () => {};
+    fs.accessSync = () => {};
+    fs.statSync = (p) => {
+      const resolved = path.resolve(p);
+      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
+      return origFs.statSync(p);
+    };
+    fs.renameSync = (from, to) => {
+      const rf = path.resolve(from); const rt = path.resolve(to);
+      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
+    };
+
+    try {
+      await runScraper();
+      const homeFile = path.resolve(path.join(os.homedir(), '.muaddib', 'data', 'iocs.json'));
+      const content = mockFiles[homeFile];
+      assert(typeof content === 'string', 'Should have written the home IOC cache');
+      assert(!content.includes('\n'), 'home cache must not be the full pretty-printed database');
+      const home = JSON.parse(content);
+      assert(home.packages.some(p => p.name === 'home-cache-pkg'), 'home cache must carry the scraped IOC');
+      const hmac = mockFiles[homeFile + '.hmac'];
+      assert(typeof hmac === 'string' && verifyIOCHMAC(content, hmac), 'home cache HMAC must match its content, or workers drop the cache');
     } finally {
       https.request = origRequest;
       console.log = origLog;
