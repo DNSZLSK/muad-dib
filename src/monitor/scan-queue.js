@@ -40,6 +40,8 @@ const MAX_SCAN_QUEUE = (() => {
   return Number.isFinite(v) && v > 0 ? v : 50_000;
 })();
 
+const { registerQueued, unregisterQueued, tryCoalesce } = require('./queue-coalesce.js');
+
 const HARD_DROP_LOG_INTERVAL_MS = 10_000;
 let _lastHardDropLog = 0;
 
@@ -80,6 +82,7 @@ const PROTECTED_EVICTION_SCAN_MAX = (() => {
  * Returns true iff an item was dropped to make room.
  */
 function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
+  if (tryCoalesce(scanQueue, item, stats)) return false;
   let dropped = false;
   if (scanQueue.length >= max) {
     // Victim = oldest unprotected item within the bounded head-window; else strict oldest.
@@ -90,6 +93,7 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
     }
     const protectedFallback = victimIdx === -1;
     const evicted = protectedFallback ? scanQueue.shift() : scanQueue.splice(victimIdx, 1)[0];
+    unregisterQueued(evicted);
     dropped = true;
     if (stats) stats.queueHardDrops = (stats.queueHardDrops || 0) + 1;
     // Spill-to-disk waiting list (MUADDIB_QUEUE_SPILL=1): the evicted item goes to
@@ -128,6 +132,7 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
     }
   }
   scanQueue.push(item);
+  registerQueued(scanQueue, item);
   return dropped;
 }
 
@@ -192,7 +197,7 @@ function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', le
   const evictedItems = [];
   let w = 0;
   for (let r = 0; r < before; r++) {
-    if (dropSet.has(r)) evictedItems.push(scanQueue[r]);
+    if (dropSet.has(r)) { evictedItems.push(scanQueue[r]); unregisterQueued(scanQueue[r]); }
     else scanQueue[w++] = scanQueue[r];
   }
   scanQueue.length = w;
@@ -280,6 +285,12 @@ function _isPriority(item) {
  * @param {{priority?: boolean, window?: number}} [opts] test overrides
  */
 function dequeueScan(scanQueue, opts = {}) {
+  const item = _dequeue(scanQueue, opts);
+  unregisterQueued(item);
+  return item;
+}
+
+function _dequeue(scanQueue, opts) {
   if (scanQueue.length === 0) return scanQueue.shift();
   // Fresh-first lanes take the NEWEST item (tail). Takes precedence over priority:
   // the freshest publish is the one we most want to be first on.
@@ -312,4 +323,10 @@ function shouldPullNewest(seq, queueLen, target, opts = {}) {
   return (seq % lanes) >= drain;                    // first `drain` slots → oldest; rest → newest
 }
 
-module.exports = { enqueueScan, evictFromScanQueueBulk, dequeueScan, shouldPullNewest, isProtected: _isProtected, MAX_SCAN_QUEUE };
+// Items restored from the persisted queue at startup are pushed directly (daemon.js):
+// index them so later items of the same name can be merged into them.
+function registerRestoredQueue(scanQueue) {
+  for (const item of scanQueue) registerQueued(scanQueue, item);
+}
+
+module.exports = { enqueueScan, evictFromScanQueueBulk, dequeueScan, shouldPullNewest, registerRestoredQueue, isProtected: _isProtected, MAX_SCAN_QUEUE };

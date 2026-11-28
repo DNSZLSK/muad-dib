@@ -308,11 +308,12 @@ async function runScanQueueCapTests() {
     registryScripts: {}, _npmInfo: { age_days: 3000, version_count: 500, latestTagVersion: version },
   });
 
-  test('CHAR: two unresolved items of the same npm name are both queued', () => {
+  // Changed by the coalescing of unresolved items (queue-coalesce.js): the second is merged.
+  test('CHAR: a second unresolved item of the same npm name is merged into the first', () => {
     const q = [];
     enqueueScan(q, { name: 'char-coal', version: '', ecosystem: 'npm', tarballUrl: null }, {});
     enqueueScan(q, { name: 'char-coal', version: '', ecosystem: 'npm', tarballUrl: null }, {});
-    assert(q.filter(i => i.name === 'char-coal').length === 2, `both unresolved items queued, got ${q.length}`);
+    assert(q.filter(i => i.name === 'char-coal').length === 1, `one unresolved item queued, got ${q.length}`);
   });
 
   test('CHAR: above 20000 queued items, two versions of an established npm package are both queued', () => {
