@@ -92,8 +92,8 @@ const ALLOWLIST = new Set([
   // ── Cross-module metadata-cache reuse: npm-registry reuses temporal-analysis's _metadataCache to
   // avoid duplicate registry fetches (perf). A behavioral test is network-coupled/flaky because
   // getPackageMetadata still fetches downloads/author; the cache lifecycle is tested via clearMetadataCache.
-  'tests/integration/monitor.test.js:9250',
-  'tests/integration/monitor.test.js:9251',
+  'tests/integration/monitor.test.js:9288',
+  'tests/integration/monitor.test.js:9289',
 
   // ── "Must-not-contain" security/cleanup absence guards: no behavioral way to observe the absence
   // of a never-taken code path. Complements eslint-plugin-security. (No shell exec in the version

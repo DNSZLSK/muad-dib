@@ -3530,6 +3530,44 @@ async function runMonitorTests() {
     }
   });
 
+  // Burst extras use the same dedup key as the scan itself (ecosystem/name@version).
+  async function runBurstExtras(scannedKeys) {
+    const queueMod = require('../../src/monitor/queue.js');
+    const scanned = new Set(['npm/burst-dedup-pkg@1.0.3', ...scannedKeys]);
+    const queue = [];
+    const item = {
+      name: 'burst-dedup-pkg', version: '1.0.3', ecosystem: 'npm',
+      tarballUrl: 'https://example.invalid/burst-dedup-pkg-1.0.3.tgz',
+      _npmInfo: {
+        version: '1.0.3', latestTagVersion: '1.0.3', recentWindowCount: 1,
+        recentVersions: [
+          { version: '1.0.1', tarball: 'https://example.invalid/burst-dedup-pkg-1.0.1.tgz' },
+          { version: '1.0.2', tarball: 'https://example.invalid/burst-dedup-pkg-1.0.2.tgz' },
+        ],
+      },
+    };
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await queueMod.resolveTarballAndScan(item, {}, [], scanned, new Map(), queue, false, null);
+    } finally {
+      console.log = origLog;
+    }
+    return queue.map(q => q.version).sort();
+  }
+
+  await asyncTest('MONITOR: burst extra already scanned (ecosystem/name@version) is not re-enqueued', async () => {
+    const enqueued = await runBurstExtras(['npm/burst-dedup-pkg@1.0.1']);
+    assert(JSON.stringify(enqueued) === '["1.0.2"]',
+      `already-scanned extra 1.0.1 must not be enqueued, got ${JSON.stringify(enqueued)}`);
+  });
+
+  await asyncTest('MONITOR: burst extra not yet scanned is enqueued', async () => {
+    const enqueued = await runBurstExtras([]);
+    assert(JSON.stringify(enqueued) === '["1.0.1","1.0.2"]',
+      `both unscanned extras must be enqueued, got ${JSON.stringify(enqueued)}`);
+  });
+
   // --- getNpmTarballUrl ---
 
   test('MONITOR: getNpmTarballUrl extracts tarball from dist', () => {
