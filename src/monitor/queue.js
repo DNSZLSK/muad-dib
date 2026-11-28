@@ -112,6 +112,7 @@ const {
 // From ./ingestion.js
 const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
 const { enqueueScan, dequeueScan, shouldPullNewest } = require('./scan-queue.js');
+const { admitBurstExtra, isEstablishedPackage } = require('./burst-extras.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball, captureForEvaluation, getArchiveTgzMinScore } = require('./tarball-archive.js');
@@ -2183,8 +2184,14 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
         }
         for (const recent of recents) {
           if (!recent || !recent.tarball || !recent.version) continue;
-          const dedupeKey = `${item.name}@${recent.version}`;
+          // Same key as the scan-time dedup below, else the guard never matches.
+          const dedupeKey = `npm/${item.name}@${recent.version}`;
           if (recentlyScanned.has(dedupeKey)) continue;
+          if (!admitBurstExtra(recent, {
+            parent: item, parentScripts: npmInfo.scripts, isBurst,
+            established: isEstablishedPackage(item._npmInfo || npmInfo),
+            queueLength: scanQueue.length,
+          })) continue;
           enqueueScan(scanQueue, {
             name: item.name,
             version: recent.version,

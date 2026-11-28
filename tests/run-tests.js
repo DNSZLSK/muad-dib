@@ -163,6 +163,7 @@ const { runEvalCaptureTests } = require('./unit/eval-capture.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
 const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
+const { runBurstExtrasTests } = require('./unit/burst-extras.test');
 const { runWorkerMemTests } = require('./unit/worker-mem.test');
 const { runPypiCatchupTests } = require('./integration/pypi-catchup.test');
 const { runHeavyLaneTests } = require('./unit/heavy-lane.test');
@@ -484,6 +485,7 @@ async function timed(name, fn) {
   await timed('scan-ledger', runScanLedgerTests);
   await timed('shadow', runShadowTests);
   await timed('spill', runSpillTests);
+  await timed('burst-extras', runBurstExtrasTests);
   await timed('worker-mem', runWorkerMemTests);
   await timed('pypi-catchup', runPypiCatchupTests);
   await timed('heavy-lane', runHeavyLaneTests);
