@@ -211,7 +211,9 @@ async function runMonitorMemoryTests() {
     assert(EMERGENCY_QUEUE_KEEP <= 1000, 'EMERGENCY_QUEUE_KEEP should be <= 1000');
   });
 
-  test('MEMORY CIRCUIT BREAKER: handleMemoryPressure at HIGH clears caches', () => {
+  // recentlyScanned is kept under memory pressure: it is bounded (50000 keys, FIFO) and
+  // clearing it only made every version still queued or spilled scan a second time.
+  test('MEMORY CIRCUIT BREAKER: handleMemoryPressure at HIGH clears caches but keeps recentlyScanned', () => {
     const testScanned = new Set(['a', 'b', 'c']);
     const testDownloads = new Map([['pkg', { downloads: 100, fetchedAt: Date.now() }]]);
     const testQueue = [];
@@ -221,8 +223,18 @@ async function runMonitorMemoryTests() {
       testScanned, testDownloads, testQueue, {}
     );
 
-    assert(testScanned.size === 0, 'HIGH should clear recentlyScanned');
+    assert(testScanned.size === 3, `HIGH must keep recentlyScanned, got ${testScanned.size} keys`);
     assert(testDownloads.size === 0, 'HIGH should clear downloadsCache');
+  });
+
+  test('MEMORY CIRCUIT BREAKER: CRITICAL and EMERGENCY keep recentlyScanned', () => {
+    for (const [label, level] of [['CRITICAL', MEMORY_PRESSURE_LEVELS.CRITICAL], ['EMERGENCY', MEMORY_PRESSURE_LEVELS.EMERGENCY]]) {
+      const rs = new Set(['npm/kept-a@1.0.0', 'npm/kept-b@1.0.0']);
+      const dc = new Map([['pkg', { downloads: 1, fetchedAt: Date.now() }]]);
+      handleMemoryPressure(level, 0.96, 0.96, rs, dc, [], {});
+      assert(rs.size === 2, `${label} must keep recentlyScanned, got ${rs.size} keys`);
+      assert(dc.size === 0, `${label} still empties downloadsCache, got ${dc.size}`);
+    }
   });
 
   test('MEMORY CIRCUIT BREAKER: handleMemoryPressure at EMERGENCY truncates queue', () => {
@@ -573,7 +585,7 @@ async function runMonitorMemoryTests() {
     assert(q[0].id === 2000 - EMERGENCY_QUEUE_KEEP, `oldest should be dropped, first kept id = ${q[0] && q[0].id}`);
     // caches cleared (EMERGENCY >= HIGH)
     assert(s.cachesCleared === true, 'EMERGENCY should clear caches');
-    assert(rs.size === 0 && dc.size === 0, 'recentlyScanned + downloadsCache should be emptied');
+    assert(rs.size === 2 && dc.size === 0, `recentlyScanned kept, downloadsCache emptied, got ${rs.size}/${dc.size}`);
     // off-heap reclaim ACTUALLY RAN: a number (not undefined=deleted, not -1=threw). 0 is the
     // correct value in CI (empty registries) — the assertion is that the statement executed and
     // captured a result, which deleting the kill call (→ undefined) or breaking it (→ -1) fails.
@@ -591,7 +603,7 @@ async function runMonitorMemoryTests() {
     for (let i = 0; i < 6000; i++) alertedPackageRules.set(`pkg-${i}`, new Set(['R']));
     const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.HIGH, 0.87, 0.87, rs, dc, q, {});
     assert(s.cachesCleared === true, 'HIGH should clear caches');
-    assert(rs.size === 0 && dc.size === 0, 'HIGH should empty recentlyScanned + downloadsCache');
+    assert(rs.size === 1 && dc.size === 0, `HIGH keeps recentlyScanned and empties downloadsCache, got ${rs.size}/${dc.size}`);
     assert(alertedPackageRules.size === 0, `HIGH should bound alertedPackageRules, got ${alertedPackageRules.size}`);
     assert(q.length === 2000 && s.queueDropped === 0, 'HIGH must NOT truncate the queue (graduated response)');
     // the off-heap reclaim is EMERGENCY-only: at HIGH those summary fields must stay unset.

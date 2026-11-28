@@ -62,16 +62,16 @@ const ALLOWLIST = new Set([
   'tests/sandbox/gvisor.test.js:489',
   'tests/sandbox/gvisor.test.js:496',
   'tests/sandbox/gvisor.test.js:497',
-  'tests/integration/monitor-memory.test.js:487',
-  'tests/integration/monitor-memory.test.js:488',
-  'tests/integration/monitor-memory.test.js:490',
-  'tests/integration/monitor-memory.test.js:491',
-  'tests/integration/monitor-memory.test.js:492',
+  'tests/integration/monitor-memory.test.js:499',
+  'tests/integration/monitor-memory.test.js:500',
+  'tests/integration/monitor-memory.test.js:502',
+  'tests/integration/monitor-memory.test.js:503',
+  'tests/integration/monitor-memory.test.js:504',
 
   // ── Docker container teardown / timeout control-flow: the sandbox kill-ladder (docker kill/rm,
   // force-resolve INCONCLUSIVE) and the timeout branch only execute against a live container.
-  'tests/integration/monitor-memory.test.js:631',
-  'tests/integration/monitor-memory.test.js:632',
+  'tests/integration/monitor-memory.test.js:643',
+  'tests/integration/monitor-memory.test.js:644',
   'tests/sandbox/sandbox.test.js:999',
   'tests/sandbox/sandbox.test.js:1000',
 
