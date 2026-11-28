@@ -602,7 +602,7 @@ function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules)
  * let running scans finish/timeout and release their memory.
  *
  * Level actions (cumulative — higher levels include lower-level actions):
- *   HIGH (85%):     clear auxiliary caches (recentlyScanned, downloadsCache, etc.)
+ *   HIGH (85%):     clear auxiliary caches (downloadsCache, alertedPackageRules; not recentlyScanned)
  *   CRITICAL (90%): clear scanner caches (temporal metadata), force GC, log loudly
  *   EMERGENCY (95%): truncate queue to EMERGENCY_QUEUE_KEEP, clear deferred queue
  *
@@ -626,7 +626,9 @@ function handleMemoryPressure(level, ratio, rssRatio, recentlyScanned, downloads
   // HIGH (85%+): clear auxiliary caches — same as old emergency prune
   if (level >= MEMORY_PRESSURE_LEVELS.HIGH) {
     console.error(`[MONITOR] MEMORY PRESSURE HIGH: ${memPctLabel} — pruning caches, stopping new workers`);
-    recentlyScanned.clear();
+    // recentlyScanned is NOT cleared: it is bounded (50000 keys, FIFO in queue.js), a few MB,
+    // and clearing it made every version still queued or spilled scan a second time. The
+    // 24 h dedup window is reset by the daily report (webhook.js).
     downloadsCache.clear();
     alertedPackageRules.clear();
     summary.cachesCleared = true;
