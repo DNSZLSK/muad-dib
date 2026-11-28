@@ -1240,20 +1240,14 @@ async function runScraper() {
     'npm-removed'
   ];
 
-  // Save enriched (full) IOCs — atomic write via .tmp + rename.
-  // Stringify ONCE: the pretty-printed DB is a giant string (~2x the 112MB+ file); a second
-  // stringify for the home copy used to double the peak on top of the zip buffers already in
-  // flight. The HMAC is computed here from the same string, then the string is released and
-  // the home copy reuses the file on disk (copyFileSync — no second serialization).
+  // Save enriched (full) IOCs — atomic write via .tmp + rename. The pretty-printed DB is a
+  // giant string (~2x the file); the block scope releases it before the next step.
   const saveSpinner = new Spinner();
   saveSpinner.start('Saving IOCs...');
   const tmpIOCFile = IOC_FILE + '.tmp';
-  let iocHmac;
   {
     const iocJsonData = JSON.stringify(existingIOCs, null, 2);
     fs.writeFileSync(tmpIOCFile, iocJsonData);
-    const { generateIOCHMAC } = require('./updater.js');
-    iocHmac = generateIOCHMAC(iocJsonData);
   }
   fs.renameSync(tmpIOCFile, IOC_FILE);
 
@@ -1276,12 +1270,16 @@ async function runScraper() {
     fs.mkdirSync(homeDir, { recursive: true });
   }
   try {
+    // The home cache is parsed by every scan worker: write it in the form updateIOCs writes
+    // (compact entries + full objects of the entries the compact file lacks), never a copy
+    // of the full database (~1 GB of heap per worker until the next light refresh).
+    const { createHomeCacheIOCs, generateIOCHMAC } = require('./updater.js');
     const tmpHomeFile = HOME_IOC_FILE + '.tmp';
-    // Byte-identical copy of the file already written locally — no second stringify peak.
-    fs.copyFileSync(IOC_FILE, tmpHomeFile);
-    // Write HMAC before rename for consistency with updater.js (computed once above from
-    // the same serialized string the local file was written from).
-    fs.writeFileSync(HOME_IOC_FILE + '.hmac', iocHmac);
+    const homeJsonData = JSON.stringify(createHomeCacheIOCs(existingIOCs, compactIOCs));
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- constant path: HOME_IOC_FILE + '.tmp'
+    fs.writeFileSync(tmpHomeFile, homeJsonData);
+    // Write HMAC before rename for consistency with updater.js.
+    fs.writeFileSync(HOME_IOC_FILE + '.hmac', generateIOCHMAC(homeJsonData));
     fs.renameSync(tmpHomeFile, HOME_IOC_FILE);
     // Mark HMAC as initialized
     const hmacMarker = path.join(homeDir, '.hmac-initialized');

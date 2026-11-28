@@ -546,6 +546,25 @@ function createLeanIOCs(fullIOCs) {
   };
 }
 
+// Home cache (~/.muaddib/data/iocs.json) built from the full database: the same form
+// updateIOCs writes, i.e. the expanded compact entries, plus the full objects of the
+// entries the compact file does not carry (local-only feeds keep their sources, so they
+// stay unpublished). Every scan worker parses this file: a copy of the full database
+// there cost about 1 GB of heap per worker. Pure: no I/O.
+function createHomeCacheIOCs(fullIOCs, compactIOCs) {
+  const home = expandCompactIOCs(compactIOCs);
+  mergeIOCs(home, fullIOCs);
+  delete home._pkgKeys;
+  delete home._pypiPkgKeys;
+  delete home._hashSet;
+  delete home._markerSet;
+  delete home._fileSet;
+  delete home._stringIocSet;
+  home.updated = fullIOCs.updated || new Date().toISOString();
+  if (fullIOCs.sources) home.sources = fullIOCs.sources;
+  return home;
+}
+
 // Phase D (degradation registry): main-thread observable status of the lean
 // projection. `missing`/`stale` re-arm the full-223MB-per-worker fallback;
 // `parseFailed` means scans run with FEWER IOCs. Read by the daemon's
@@ -854,4 +873,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, isLocalOnlyIOC, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, getLeanStatus, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, isLocalOnlyIOC, expandCompactIOCs, createLeanIOCs, createHomeCacheIOCs, ensureLeanIOCFile, writeLeanIOCFile, getLeanStatus, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
