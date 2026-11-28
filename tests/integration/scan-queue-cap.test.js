@@ -9,7 +9,7 @@
  * counter. A small `max` is passed so the cap is exercised without 50k items.
  */
 
-const { test, assert } = require('../test-utils');
+const { test, asyncTest, assert } = require('../test-utils');
 const { enqueueScan, evictFromScanQueueBulk, dequeueScan, shouldPullNewest, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
 
 async function runScanQueueCapTests() {
@@ -219,6 +219,86 @@ async function runScanQueueCapTests() {
     const opts = { enabled: true, threshold: 0, drainLanes: 99 };
     assert(shouldPullNewest(0, 100, 2, opts) === false, 'lane 0 drains (oldest)');
     assert(shouldPullNewest(1, 100, 2, opts) === true, 'lane 1 stays fresh (clamp leaves ≥1)');
+  });
+
+  // ── Characterization of the current queue (lot 8 step 4) ─────────────────
+  // Freezes today's behavior, quirks included, before the risk-ordered queue changes it.
+
+  test('CHAR: an interrupted item is protected from cap and bulk eviction', () => {
+    const q = [{ name: 'interrupted-old', interrupted: true }, { name: 'plain' }];
+    enqueueScan(q, { name: 'new' }, {}, 2);
+    assert(q.map(i => i.name).join(',') === 'interrupted-old,new', `cap eviction keeps the interrupted item, got ${q.map(i => i.name)}`);
+    const b = [{ name: 'interrupted-old', interrupted: true }, { name: 'p1' }, { name: 'p2' }];
+    evictFromScanQueueBulk(b, 1, 'test', () => {});
+    assert(b.length === 1 && b[0].name === 'interrupted-old', `bulk eviction keeps the interrupted item, got ${b.map(i => i.name)}`);
+  });
+
+  test('CHAR: dequeue priority ignores atoSignal, interrupted and burst extras, which eviction protects', () => {
+    for (const flag of ['atoSignal', 'interrupted', 'isATOBurstExtra']) {
+      const q = [{ name: 'plain' }, { name: 'flagged', [flag]: true }];
+      const first = dequeueScan(q, { priority: true });
+      assert(first.name === 'plain', `${flag} is not a dequeue priority today, got ${first.name}`);
+    }
+  });
+
+  test('CHAR: cap eviction looks for an unprotected victim in the first 1024 slots only', () => {
+    const q = [];
+    for (let i = 0; i < 1024; i++) q.push({ name: `prot-${i}`, firstPublish: true });
+    q.push({ name: 'plain-beyond-window' });
+    enqueueScan(q, { name: 'new' }, {}, q.length);
+    assert(q[0].name === 'prot-1', `the oldest protected item is evicted, got head ${q[0].name}`);
+    assert(q.some(i => i.name === 'plain-beyond-window'), 'the unprotected item past the window survives');
+  });
+
+  test('CHAR: pre-resolve sheds strictly above 2000 queued items', () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const limiter = require('../../src/shared/http-limiter.js');
+    const origBrain = limiter.getBrainState;
+    try {
+      limiter.getBrainState = () => ({ level: 0 });
+      assert(ingestion.preResolveShouldShed({ length: 2000 }) === false, '2000 queued: no shed');
+      assert(ingestion.preResolveShouldShed({ length: 2001 }) === true, '2001 queued: shed');
+    } finally {
+      limiter.getBrainState = origBrain;
+    }
+  });
+
+  // resolveTarballAndScan checks `signal.aborted` before and right after the temporal
+  // load-shed decision: a signal that turns aborted on its third read stops the scan just
+  // after the decision, before any download.
+  const abortAfterShedDecision = () => { const s = { reads: 0 }; Object.defineProperty(s, 'aborted', { get() { return ++s.reads >= 3; } }); return s; };
+  async function runShedDecision(item, queueLen) {
+    const queue = require('../../src/monitor/queue.js');
+    const stats = {};
+    const logs = [];
+    const origLog = console.log;
+    const signal = abortAfterShedDecision();
+    console.log = (...a) => logs.push(a.join(' '));
+    try {
+      await queue.resolveTarballAndScan(item, stats, [], new Set(), new Map(), new Array(queueLen), false, signal);
+    } finally {
+      console.log = origLog;
+    }
+    assert(signal.reads === 3, `the scan must stop right after the shed decision (signal read ${signal.reads} times)`);
+    return { shed: stats.temporalLoadShed || 0, logged: logs.some(l => l.includes('TEMPORAL LOAD-SHED')) };
+  }
+  const npmItem = (extra) => ({ name: 'char-pkg', version: '1.0.0', ecosystem: 'npm', tarballUrl: 'https://registry.npmjs.org/char-pkg/-/char-pkg-1.0.0.tgz', ...extra });
+
+  await asyncTest('CHAR: above 2000 queued items the temporal checks are shed for every class', async () => {
+    for (const extra of [{}, { isIOCMatch: true }, { firstPublish: true }, { isBurst: true }, { atoSignal: true }]) {
+      const r = await runShedDecision(npmItem(extra), 2001);
+      assert(r.shed === 1 && r.logged, `shed for ${JSON.stringify(extra)}, got ${JSON.stringify(r)}`);
+    }
+  });
+
+  await asyncTest('CHAR: a fast-tracked item skips the temporal checks without being counted as shed', async () => {
+    const r = await runShedDecision(npmItem({ fastTrack: true }), 2001);
+    assert(r.shed === 0 && !r.logged, `fast-track is not counted, got ${JSON.stringify(r)}`);
+  });
+
+  await asyncTest('CHAR: a PyPI item is never counted as temporal load-shed', async () => {
+    const r = await runShedDecision({ name: 'char-py', version: '1.0.0', ecosystem: 'pypi', tarballUrl: 'https://files.example/char-py-1.0.0.tar.gz' }, 2001);
+    assert(r.shed === 0 && !r.logged, `PyPI is not counted, got ${JSON.stringify(r)}`);
   });
 
   console.log('  ✓ scan queue hard-cap (P0c) + priority-dequeue (A2) + fresh-first (Phase 2) tests passed');
