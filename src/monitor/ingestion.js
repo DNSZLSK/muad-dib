@@ -1735,6 +1735,7 @@ module.exports = {
   POLL_MAX_BACKOFF,
   MAX_RESPONSE_BYTES,
   SOFT_BACKPRESSURE_THRESHOLD,
+  _hasInstallHookDelta,
 
   // Mutable state
   getConsecutivePollErrors,
