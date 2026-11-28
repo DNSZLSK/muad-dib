@@ -301,6 +301,28 @@ async function runScanQueueCapTests() {
     assert(r.shed === 0 && !r.logged, `PyPI is not counted, got ${JSON.stringify(r)}`);
   });
 
+  // Same-name items, before coalescing by name.
+  const fillers = (n) => Array.from({ length: n }, (_, i) => ({ name: `filler-${i}`, version: '1.0.0', ecosystem: 'npm' }));
+  const resolvedItem = (version) => ({
+    name: 'char-coal', version, ecosystem: 'npm', tarballUrl: `https://registry.example/char-coal-${version}.tgz`,
+    registryScripts: {}, _npmInfo: { age_days: 3000, version_count: 500, latestTagVersion: version },
+  });
+
+  test('CHAR: two unresolved items of the same npm name are both queued', () => {
+    const q = [];
+    enqueueScan(q, { name: 'char-coal', version: '', ecosystem: 'npm', tarballUrl: null }, {});
+    enqueueScan(q, { name: 'char-coal', version: '', ecosystem: 'npm', tarballUrl: null }, {});
+    assert(q.filter(i => i.name === 'char-coal').length === 2, `both unresolved items queued, got ${q.length}`);
+  });
+
+  test('CHAR: above 20000 queued items, two versions of an established npm package are both queued', () => {
+    const q = fillers(20_000);
+    enqueueScan(q, resolvedItem('1.0.1'), {});
+    enqueueScan(q, resolvedItem('1.0.2'), {});
+    const v = q.filter(i => i.name === 'char-coal').map(i => i.version).join(',');
+    assert(v === '1.0.1,1.0.2', `both versions queued in order, got ${v}`);
+  });
+
   console.log('  ✓ scan queue hard-cap (P0c) + priority-dequeue (A2) + fresh-first (Phase 2) tests passed');
 }
 
