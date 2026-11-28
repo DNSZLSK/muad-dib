@@ -139,6 +139,81 @@ async function runSpillTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // ── Characterization of SPILL_CAP (current behavior, quirks included) ──
+
+  test('SPILL_CAP: ATO, burst, burst-extra and interrupted items are protected while unprotected items remain', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-cap-classes.jsonl`);
+    try {
+      withSpillEnv(f, () => {
+        const entries = [
+          item('ato', { atoSignal: true }), item('burst', { isBurst: true }),
+          item('extra', { isATOBurstExtra: true }), item('interrupted', { interrupted: true }),
+          ...Array.from({ length: 8 }, (_, i) => item(`plain-${i + 1}`))
+        ];
+        fs.writeFileSync(f, entries.map(e => JSON.stringify({ ts: 'x', ...e })).join('\n') + '\n');
+        const ledgered = [];
+        spill._compactBacklog(f, e => ledgered.push(e));
+        const kept = readBacklog(f).map(e => e.name);
+        for (const n of ['ato', 'burst', 'extra', 'interrupted']) assert(kept.includes(n), `${n} survives the cap, got ${kept.join(',')}`);
+        assert(ledgered.map(l => l.name).join(',') === 'plain-1,plain-2', `the two oldest unprotected are dropped, got ${ledgered.map(l => l.name)}`);
+      }, { max: 10 });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL_CAP: with only protected items left, the oldest is dropped whatever its class', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-cap-oldest.jsonl`);
+    try {
+      withSpillEnv(f, () => {
+        const entries = [
+          item('ioc-oldest', { isIOCMatch: true }),
+          ...Array.from({ length: 10 }, (_, i) => item(`extra-${i + 1}`, { isATOBurstExtra: true }))
+        ];
+        fs.writeFileSync(f, entries.map(e => JSON.stringify({ ts: 'x', ...e })).join('\n') + '\n');
+        const ledgered = [];
+        spill._compactBacklog(f, e => ledgered.push(e));
+        assert(ledgered.length === 1 && ledgered[0].name === 'ioc-oldest', `the older IOC match goes before newer burst extras, got ${JSON.stringify(ledgered)}`);
+        assert(ledgered[0].source === 'spill_cap_protected', 'protected drop keeps its distinct source');
+      }, { max: 10 });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL_CAP: a drop is written outcome dropped in the scan ledger, without the IOC or ATO flag', () => {
+    const state = require('../../src/monitor/state.js');
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-cap-ledger.jsonl`);
+    const ledgerFile = state.SCAN_LEDGER_FILE;
+    const before = fs.existsSync(ledgerFile) ? fs.statSync(ledgerFile).size : 0;
+    try {
+      withSpillEnv(f, () => {
+        // All protected, oldest first: the IOC, the ATO and the first publish are the victims.
+        spill.spillItems([
+          item('cap-ioc', { isIOCMatch: true }), item('cap-ato', { atoSignal: true }), item('cap-fp', { firstPublish: true }),
+          ...Array.from({ length: 30 }, (_, i) => item(`cap-extra-${i}`, { isATOBurstExtra: true, tarballUrl: 'https://r/' + 'x'.repeat(200) }))
+        ]);
+      }, { max: 10 });
+      const added = fs.readFileSync(ledgerFile, 'utf8').slice(before).split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const byName = Object.fromEntries(added.map(l => [l.name, l]));
+      for (const n of ['cap-ioc', 'cap-ato', 'cap-fp']) {
+        assert(byName[n] && byName[n].outcome === 'dropped' && byName[n].source === 'spill_cap_protected', `${n} ledgered as dropped, got ${JSON.stringify(byName[n])}`);
+      }
+      assert(byName['cap-fp'].firstPublish === true, 'the first-publish flag is kept');
+      assert(byName['cap-ioc'].isIOCMatch === undefined && byName['cap-ato'].atoSignal === undefined, 'the ledger line does not say IOC match or ATO');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL_CAP: the cap is checked on an estimated 256 bytes per line, so short lines exceed it without eviction', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-cap-bytes.jsonl`);
+    try {
+      withSpillEnv(f, () => {
+        // cap 10 → byte budget 2560. 20 short lines stay under it: no eviction.
+        spill.spillItems(Array.from({ length: 20 }, (_, i) => item(`s${i}`)));
+        assert(readBacklog(f).length === 20, `20 entries kept over a cap of 10, got ${readBacklog(f).length}`);
+        // Crossing the byte budget evicts the whole excess at once, down to the cap.
+        spill.spillItems(Array.from({ length: 20 }, (_, i) => item(`t${i}`)));
+        assert(readBacklog(f).length === 10, `compacted to the cap once over the byte budget, got ${readBacklog(f).length}`);
+      }, { max: 10 });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   test('SPILL: drain takes protected first, respects the batch bound, rewrites the remainder', () => {
     const f = path.join(os.tmpdir(), `spill-${Date.now()}-drain.jsonl`);
     try {
