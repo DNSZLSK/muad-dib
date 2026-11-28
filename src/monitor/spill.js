@@ -58,6 +58,7 @@ const path = require('path');
 
 const { isProtected } = require('./scan-queue.js');
 const { dataPath } = require('../shared/data-dir.js');
+const { beginOp, endOp } = require('./event-loop-monitor.js');
 
 const DEFAULT_SPILL_FILE = dataPath('scan-backlog.jsonl');
 const DEFAULT_MAX_ENTRIES = 200_000;
@@ -247,6 +248,10 @@ function drainBacklog(scanQueue, stats, opts = {}) {
     try { st = fs.statSync(file); } catch { return res; } // no backlog — cheap exit
     if (!st.size) return res;
 
+    // Reads and rewrites the whole backlog synchronously: name the op so a loop stall
+    // it causes is attributed in the LOOP-STALL line.
+    const op = beginOp('spill:drain', { backlogBytes: st.size });
+    try {
     const entries = _readEntries(file);
     if (entries.length === 0) { res.remaining = 0; return res; }
 
@@ -283,6 +288,7 @@ function drainBacklog(scanQueue, stats, opts = {}) {
       stats.spillDrained = (stats.spillDrained || 0) + res.drained;
       stats.spillDeduped = (stats.spillDeduped || 0) + res.deduped;
     }
+    } finally { endOp(op); }
   } catch { /* never throw — worst case the same items drain next tick */ }
   return res;
 }

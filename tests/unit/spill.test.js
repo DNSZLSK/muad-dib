@@ -184,6 +184,48 @@ async function runSpillTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // The drain reads and rewrites the whole backlog on the main thread: a stall it causes
+  // must carry its name in the LOOP-STALL line instead of "no op breadcrumb".
+  test('SPILL: a stall during the drain is attributed to spill:drain', () => {
+    const elm = require('../../src/monitor/event-loop-monitor.js');
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-op.jsonl`);
+    let t = 1000;
+    elm._reset(() => t);
+    try {
+      withSpillEnv(f, () => {
+        spill.spillItems([item('op-a'), item('op-b')]);
+        let seen = null;
+        spill.drainBacklog([], {}, {
+          maxItems: 1,
+          enqueueFn: (queue, it) => { seen = elm.opOverlapping(t, t); queue.push(it); }
+        });
+        assert(seen && seen.label === 'spill:drain', `drain must run under the spill:drain breadcrumb, got ${JSON.stringify(seen)}`);
+        assert(seen.meta && seen.meta.backlogBytes > 0, 'breadcrumb carries the backlog size');
+      });
+    } finally { elm._reset(); try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL: a stall after the drain, or a drain with no backlog, is not attributed to it', () => {
+    const elm = require('../../src/monitor/event-loop-monitor.js');
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-op2.jsonl`);
+    let t = 1000;
+    elm._reset(() => t);
+    try {
+      withSpillEnv(f, () => {
+        spill.spillItems([item('op-c')]);
+        spill.drainBacklog([], {}, { maxItems: 1, enqueueFn: (queue, it) => queue.push(it) });
+        t = 100000;
+        const later = elm.opOverlapping(50000, 60000);
+        assert(later === null, `a later stall must not be attributed to the drain, got ${JSON.stringify(later)}`);
+      });
+      elm._reset(() => t);
+      withSpillEnv(f + '.missing', () => {
+        spill.drainBacklog([], {}, { maxItems: 1, enqueueFn: (queue, it) => queue.push(it) });
+      });
+      assert(elm.opOverlapping(0, t) === null, 'no backlog: no breadcrumb');
+    } finally { elm._reset(); try { fs.unlinkSync(f); } catch {} }
+  });
+
   test('SPILL: drain tolerates a corrupt line (crash mid-write) and missing file', () => {
     const f = path.join(os.tmpdir(), `spill-${Date.now()}-corrupt.jsonl`);
     try {
